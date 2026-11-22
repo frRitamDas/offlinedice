@@ -3524,9 +3524,9 @@ body.blur-active header img[src="offlinetext.png"]:hover {
             </div>
 
             <div class="prediction-roll-stepper">
-              <button class="stepper-btn" onclick="stepPredictionRoll(-1)" title="Inspect Previous Roll">◀ PREV ROLL</button>
-              <button class="stepper-btn" onclick="stepPredictionRoll(0)" style="border-color:#FFEA3D; color:#FFEA3D;" title="Sync to Immediate Next Roll">⚡ LIVE NEXT</button>
-              <button class="stepper-btn" onclick="stepPredictionRoll(1)" title="Inspect Next Roll Ahead">NEXT ROLL (+1) ▶</button>
+              <button class="stepper-btn" onclick="stepPredictionRoll(-1)" title="Inspect Previous Firebase Roll">◀ PREV DB ROLL</button>
+              <button class="stepper-btn" onclick="stepPredictionRoll(0)" style="border-color:#FFEA3D; color:#FFEA3D;" title="Show Active Live / Queued Firebase Roll">⚡ LIVE / QUEUED</button>
+              <button class="stepper-btn" onclick="preQueueNextRollForActiveId()" style="border-color:#00D2FF; color:#00D2FF;" title="Generate & Pre-Queue a New Next Roll in Firebase">🎲 NEW QUEUE</button>
             </div>
           </div>
 
@@ -3540,11 +3540,11 @@ body.blur-active header img[src="offlinetext.png"]:hover {
           <div id="predColorBreakdown" class="color-breakdown-grid"></div>
         </div>
 
-        <!-- UPCOMING 5-ROLL LOOKAHEAD QUEUE -->
+        <!-- LIVE FIREBASE QUEUE & VERIFIED STREAM -->
         <div class="upcoming-queue-section">
           <div class="section-sub-header">
-            <span>📅 UPCOMING 5-ROLL FORECAST QUEUE (BEFORE THEY ROLL)</span>
-            <span style="font-size: 12px; color: rgba(255,255,255,0.65); font-family: Fredoka, sans-serif;">Click any roll to inspect</span>
+            <span>📡 FIREBASE PRE-QUEUED NEXT ROLL &amp; VERIFIED ROLLS</span>
+            <span style="font-size: 12px; color: rgba(255,255,255,0.65); font-family: Fredoka, sans-serif;">100% Real Firebase Data (Zero Guessing)</span>
           </div>
           <div id="predUpcomingQueueList" class="upcoming-queue-list"></div>
         </div>

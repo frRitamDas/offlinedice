@@ -25,146 +25,73 @@
       .replace(/[^A-Z0-9_-]/g, "");
   }
 
-  // 128-bit string hash (cyrb128) for deterministic ID seeding
-  function cyrb128(str) {
-    let h1 = 1779033703,
-      h2 = 3144134277,
-      h3 = 1013904242,
-      h4 = 2773480762;
-    for (let i = 0, k; i < str.length; i++) {
-      k = str.charCodeAt(i);
-      h1 = h2 ^ Math.imul(h1 ^ k, 597399067);
-      h2 = h3 ^ Math.imul(h2 ^ k, 2869860233);
-      h3 = h4 ^ Math.imul(h3 ^ k, 951274213);
-      h4 = h1 ^ Math.imul(h4 ^ k, 2716044179);
+  function randomHexHash() {
+    const arr = new Uint8Array(4);
+    if (global.crypto && global.crypto.getRandomValues) {
+      global.crypto.getRandomValues(arr);
+    } else {
+      for (let i = 0; i < 4; i++) arr[i] = Math.floor(Math.random() * 256);
     }
-    h1 = Math.imul(h3 ^ (h1 >>> 18), 597399067);
-    h2 = Math.imul(h4 ^ (h2 >>> 22), 2869860233);
-    h3 = Math.imul(h1 ^ (h3 >>> 17), 951274213);
-    h4 = Math.imul(h2 ^ (h4 >>> 19), 2716044179);
-    h1 ^= h2 ^ h3 ^ h4;
-    h2 ^= h1;
-    h3 ^= h1;
-    h4 ^= h1;
-    return [h1 >>> 0, h2 >>> 0, h3 >>> 0, h4 >>> 0];
-  }
-
-  // High-quality 32-bit PRNG (sfc32)
-  function sfc32(a, b, c, d) {
-    return function () {
-      a >>>= 0;
-      b >>>= 0;
-      c >>>= 0;
-      d >>>= 0;
-      let t = (a + b) | 0;
-      a = b ^ (b >>> 9);
-      b = (c + (c << 3)) | 0;
-      c = (c << 21) | (c >>> 11);
-      d = (d + 1) | 0;
-      t = (t + d) | 0;
-      c = (c + t) | 0;
-      return (t >>> 0) / 4294967296;
-    };
-  }
-
-  function getForcedOverridesMap() {
-    try {
-      const raw = localStorage.getItem("offlinedice_forced_rolls_v1");
-      return raw ? JSON.parse(raw) : {};
-    } catch (e) {
-      return {};
-    }
-  }
-
-  function saveForcedOverride(gameId, rollNumber, colorNames) {
-    const cleanId = normalizeGameId(gameId);
-    if (!cleanId) return;
-    try {
-      const map = getForcedOverridesMap();
-      if (!map[cleanId]) map[cleanId] = {};
-      if (!colorNames || colorNames.length === 0) {
-        delete map[cleanId][String(rollNumber)];
-      } else {
-        map[cleanId][String(rollNumber)] = colorNames;
-      }
-      localStorage.setItem("offlinedice_forced_rolls_v1", JSON.stringify(map));
-    } catch (e) {}
-  }
-
-  function getForcedOverride(gameId, rollNumber) {
-    const cleanId = normalizeGameId(gameId);
-    if (!cleanId) return null;
-    const map = getForcedOverridesMap();
-    const entry = map[cleanId] && map[cleanId][String(rollNumber)];
-    if (Array.isArray(entry) && entry.length > 0) {
-      return entry
-        .map((name) => COLOR_BY_NAME[String(name).toUpperCase()] || DICE_COLORS[0]);
-    }
-    return null;
-  }
-
-  function clearForcedOverrides(gameId) {
-    const cleanId = normalizeGameId(gameId);
-    if (!cleanId) return;
-    try {
-      const map = getForcedOverridesMap();
-      delete map[cleanId];
-      localStorage.setItem("offlinedice_forced_rolls_v1", JSON.stringify(map));
-    } catch (e) {}
+    return (
+      "0x" +
+      Array.from(arr)
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("")
+        .toUpperCase()
+    );
   }
 
   /**
-   * Deterministically predicts the exact dice colors for a given (gameId, rollNumber, diceCount).
-   * Both the Predictor UI and the Offline Dice Game use this exact function so predictions
-   * match 100% before the roll button is pressed.
+   * Generates a real CSPRNG roll (used to pre-queue the exact next roll into Firebase
+   * sessions/<ID>/next_roll before the player clicks Roll).
    */
-  function predictRollById(gameId, rollNumber, diceCount, options = {}) {
-    const cleanId = normalizeGameId(gameId) || "DEFAULT";
+  function generateRealCsprngRoll(gameId, rollNumber, diceCount, customColorNames = null) {
+    const cleanId = normalizeGameId(gameId) || "SESSION";
     const rollNum = Math.max(1, parseInt(rollNumber, 10) || 1);
     const count = Math.min(100, Math.max(1, parseInt(diceCount, 10) || 4));
 
-    // Check if there is a forced/locked custom roll for this ID + rollNum
-    const customOverride = options.customColors || getForcedOverride(cleanId, rollNum);
-
-    const seedKey = `${cleanId}::OFFLINEDICE_PREDICTOR::ROLL_${rollNum}`;
-    const seed = cyrb128(seedKey);
-    const rand = sfc32(seed[0], seed[1], seed[2], seed[3]);
-
-    // Warm up PRNG rounds
-    for (let i = 0; i < 8; i++) rand();
-
-    const dice = [];
-    for (let d = 0; d < count; d++) {
-      if (customOverride && customOverride[d]) {
-        const c = customOverride[d];
-        dice.push({
-          dieNumber: d + 1,
-          name: c.name,
-          hex: c.hex,
-          emoji: c.emoji,
-          rgb: c.rgb
-        });
+    const names = [];
+    if (Array.isArray(customColorNames) && customColorNames.length > 0) {
+      for (let i = 0; i < count; i++) {
+        const c = COLOR_BY_NAME[String(customColorNames[i % customColorNames.length]).toUpperCase()] || DICE_COLORS[0];
+        names.push(c.name);
+      }
+    } else {
+      const randBuf = new Uint32Array(count);
+      if (global.crypto && global.crypto.getRandomValues) {
+        global.crypto.getRandomValues(randBuf);
       } else {
-        const dieSeed = cyrb128(`${seedKey}::DIE_${d}::N_${count}`);
-        const dieRand = sfc32(dieSeed[0] ^ seed[0], dieSeed[1] ^ seed[1], dieSeed[2], dieSeed[3]);
-        dieRand();
-        dieRand();
-        const colorIndex = Math.floor(dieRand() * DICE_COLORS.length) % DICE_COLORS.length;
-        const c = DICE_COLORS[colorIndex];
-        dice.push({
-          dieNumber: d + 1,
-          name: c.name,
-          hex: c.hex,
-          emoji: c.emoji,
-          rgb: c.rgb
-        });
+        for (let i = 0; i < count; i++) randBuf[i] = Math.floor(Math.random() * 6);
+      }
+      for (let i = 0; i < count; i++) {
+        const c = DICE_COLORS[randBuf[i] % DICE_COLORS.length];
+        names.push(c.name);
       }
     }
 
-    const hashVal = ((seed[0] ^ seed[2]) >>> 0).toString(16).toUpperCase().padStart(8, "0");
-    const hash = "0x" + hashVal;
+    return buildRollObject(cleanId, rollNum, names, randomHexHash(), Date.now(), Boolean(customColorNames));
+  }
 
-    // Summarize color counts
+  /**
+   * Builds a rich roll object from exact Firebase color names or hexes.
+   */
+  function buildRollObject(gameId, rollNumber, colorNamesOrHexes, hash, timestamp, isCustomLocked = false) {
+    const cleanId = normalizeGameId(gameId);
+    const rollNum = Math.max(1, parseInt(rollNumber, 10) || 1);
+    const rawList = Array.isArray(colorNamesOrHexes) ? colorNamesOrHexes : [];
+
+    const dice = rawList.map((item, idx) => {
+      const key = String(item || "").trim().toUpperCase();
+      const c = COLOR_BY_NAME[key] || COLOR_BY_HEX[key] || DICE_COLORS[0];
+      return {
+        dieNumber: idx + 1,
+        name: c.name,
+        hex: c.hex,
+        emoji: c.emoji,
+        rgb: c.rgb
+      };
+    });
+
     const counts = {};
     DICE_COLORS.forEach((c) => {
       counts[c.name] = 0;
@@ -185,31 +112,20 @@
     return {
       gameId: cleanId,
       rollNumber: rollNum,
-      diceCount: count,
+      diceCount: dice.length,
       dice: dice,
       colors: dice.map((d) => d.hex),
       names: dice.map((d) => d.name),
-      hash: hash,
+      hash: hash || randomHexHash(),
+      time: timestamp || Date.now(),
       counts: counts,
       dominantColor: dominantColor,
       dominantCount: maxCount,
-      isCustomLocked: Boolean(customOverride)
+      isCustomLocked: Boolean(isCustomLocked)
     };
   }
 
-  /**
-   * Generates a lookahead queue of upcoming rolls (e.g., Next 5 Rolls: #N+1 to #N+5)
-   */
-  function predictUpcomingQueue(gameId, startRollNumber, diceCount, queueLength = 5) {
-    const queue = [];
-    const start = Math.max(1, parseInt(startRollNumber, 10) || 1);
-    for (let i = 0; i < queueLength; i++) {
-      queue.push(predictRollById(gameId, start + i, diceCount));
-    }
-    return queue;
-  }
-
-  // Web Audio synth for clean sound effects (works 100% offline without external mp3 files)
+  // Web Audio synth for clean instant notifications
   let audioCtx = null;
   function getAudioContext() {
     if (!audioCtx && (window.AudioContext || window.webkitAudioContext)) {
@@ -221,7 +137,7 @@
     return audioCtx;
   }
 
-  function playAlertPing(type = "predict") {
+  function playAlertPing(type = "intercept") {
     try {
       const ctx = getAudioContext();
       if (!ctx) return;
@@ -233,21 +149,21 @@
       const now = ctx.currentTime;
       if (type === "intercept") {
         osc.type = "triangle";
-        osc.frequency.setValueAtTime(587.33, now); // D5
-        osc.frequency.setValueAtTime(880, now + 0.08); // A5
-        osc.frequency.setValueAtTime(1174.66, now + 0.16); // D6
-        gain.gain.setValueAtTime(0.18, now);
-        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.38);
+        osc.frequency.setValueAtTime(587.33, now);
+        osc.frequency.setValueAtTime(880, now + 0.07);
+        osc.frequency.setValueAtTime(1174.66, now + 0.14);
+        gain.gain.setValueAtTime(0.2, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
         osc.start(now);
-        osc.stop(now + 0.38);
+        osc.stop(now + 0.35);
       } else {
         osc.type = "sine";
-        osc.frequency.setValueAtTime(523.25, now); // C5
-        osc.frequency.setValueAtTime(659.25, now + 0.07); // E5
+        osc.frequency.setValueAtTime(523.25, now);
+        osc.frequency.setValueAtTime(659.25, now + 0.06);
         gain.gain.setValueAtTime(0.12, now);
-        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
         osc.start(now);
-        osc.stop(now + 0.22);
+        osc.stop(now + 0.2);
       }
     } catch (e) {}
   }
@@ -257,11 +173,9 @@
     COLOR_BY_NAME,
     COLOR_BY_HEX,
     normalizeGameId,
-    predictRollById,
-    predictUpcomingQueue,
-    saveForcedOverride,
-    getForcedOverride,
-    clearForcedOverrides,
+    randomHexHash,
+    generateRealCsprngRoll,
+    buildRollObject,
     playAlertPing
   };
 })(window);
