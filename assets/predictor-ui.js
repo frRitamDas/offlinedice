@@ -117,10 +117,9 @@
           if (sel) sel.value = String(currentDiceCount);
         }
       } else {
-        // Brand-new session with 0 rolls in Firebase: automatically pre-rig Roll #1 in Firebase so user sees all 4 colors BEFORE clicking!
         const sess = window.getOfflineDiceSession ? window.getOfflineDiceSession() : null;
         const isLocalSession = sess && Predictor.normalizeGameId(sess.gameId) === cleanId;
-        if (!isLocalSession && prefetchInFlightForId !== cleanId) {
+        if (isLocalSession && prefetchInFlightForId !== cleanId) {
           prefetchInFlightForId = cleanId;
           window.preQueueNextRollForActiveId();
         }
@@ -248,28 +247,35 @@
 
     if (!activeRoll) {
       if (stageBadge) {
-        stageBadge.innerHTML = `⏳ PRE-FETCHING EXACT NEXT DICE FOR #${cleanId} (BEFORE YOU CLICK)...`;
+        stageBadge.innerHTML = `📡 LISTENING TO FIREBASE FOR #${cleanId} (READY FOR OFFLINE-DICE.COM)...`;
       }
       if (hashBadge) {
         hashBadge.textContent = `100% SERVER VERIFIED PRE-CLICK ENGINE • FIREBASE rollDiceSecure`;
       }
       if (diceShowcase) {
         diceShowcase.innerHTML = `
-          <div style="text-align:center; padding: 18px 16px; max-width: 540px;">
-            <div style="font-size: 16px; font-weight: 800; color: #00D2FF; margin-bottom: 8px;">
-              🔮 Pre-Fetching Exact Next Roll for <span style="color:#FFEA3D;">#${cleanId}</span>...
+          <div style="text-align:left; padding: 14px 18px; max-width: 580px; background: rgba(0,0,0,0.45); border: 1px solid rgba(255,234,61,0.35); border-radius: 14px;">
+            <div style="font-size: 15px; font-weight: 800; color: #FFEA3D; margin-bottom: 8px; text-align:center;">
+              🔮 How to See All 4 Colors on <span style="color:#00D2FF;">offline-dice.com</span> BEFORE Clicking Roll:
             </div>
-            <div style="font-size: 13px; color: rgba(255,255,255,0.78); line-height: 1.5; margin-bottom: 12px;">
-              Fetching the upcoming server roll from Firebase so you see the exact colors <strong>before you click "ROLL AGAIN !"</strong>
+            <ol style="font-size: 12.5px; color: rgba(255,255,255,0.88); line-height: 1.6; margin: 0 0 12px 18px; padding: 0;">
+              <li>Click the yellow <strong>📋 Copy Pre-Click Hook</strong> button below.</li>
+              <li>Go to your <strong>offline-dice.com</strong> tab and press <strong>F12</strong> (or <strong>Right-Click → Inspect → Console</strong>).</li>
+              <li>Paste the code into the <strong>Console</strong> and press <strong>Enter</strong> (if Chrome asks first time, type <code>allow pasting</code> and press Enter).</li>
+            </ol>
+            <div style="display:flex; gap:8px; justify-content:center; flex-wrap:wrap;">
+              <button class="predictor-mini-btn" style="background:#FFEA3D; color:#000; border-color:#FFEA3D; padding:8px 14px; font-size:13px; font-weight:800;" onclick="copyExternalSitePreClickHook()">
+                📋 Copy Pre-Click Hook for offline-dice.com
+              </button>
+              <button class="predictor-mini-btn" style="border-color:#00D2FF; color:#00D2FF; padding:8px 14px; font-size:12.5px;" onclick="preQueueNextRollForActiveId()">
+                🔮 Force Pre-Rig #${cleanId}
+              </button>
             </div>
-            <button class="predictor-mini-btn" style="border-color:#FFEA3D; color:#FFEA3D; padding:8px 14px; font-size:13px;" onclick="preQueueNextRollForActiveId()">
-              🔮 Pre-Fetch Exact Next Roll (#${loggedRollsCount + 1}) Now
-            </button>
           </div>
         `;
       }
       if (seqBar) {
-        seqBar.innerHTML = `<span style="color:rgba(255,255,255,0.65);">Connecting to Firebase Pre-Click Buffer for <strong>#${cleanId}</strong>...</span>`;
+        seqBar.innerHTML = `<span style="color:rgba(255,255,255,0.75);">Connected to Firebase <strong>sessions/${cleanId}/rolls</strong> — Paste Pre-Click Hook on offline-dice.com or roll to intercept!</span>`;
       }
       if (breakdownGrid) {
         breakdownGrid.innerHTML = "";
@@ -596,7 +602,7 @@
   };
 
   window.copyExternalSitePreClickHook = function () {
-    const hookCode = `(function(){if(window.__odPreClickActive){alert("Pre-Click Predictor Sync is already active!");return;}window.__odPreClickActive=true;window.__odBuffered=null;window.__odLastLandedId=null;const db=firebase.database(firebase.apps[0],"https://offline-dice-verify-default-rtdb.europe-west1.firebasedatabase.app");db.ref("sessions/"+y+"/rolls").limitToLast(1).on("value",snap=>{if(!snap.exists()||f)return;snap.forEach(ch=>{const k=ch.key,v=ch.val()||{};if(k&&k!==window.__odLastLandedId&&Array.isArray(v.names)&&v.names.length>0){window.__odBuffered={dc:v.names.length,rollId:k,dice:v.names.map(nm=>u.find(c=>c.name===nm)||u[0])};}});});window.__odPrefetch=async function(){const dc=parseInt(document.getElementById("diceCount")?.value,10)||4;const res=await a({sessionId:y,diceCount:dc});const cols=res?.data?.colors||[],rId=res?.data?.rollId||"";if(cols.length>0){window.__odBuffered={dc,rollId:rId,dice:cols.map(nm=>u.find(c=>c.name===nm)||u[0])};}};document.getElementById("diceCount")?.addEventListener("change",()=>window.__odPrefetch());window.rollDice=async function(){if(f)return;f=true;const dc=parseInt(document.getElementById("diceCount")?.value,10)||4;if(!window.__odBuffered||window.__odBuffered.dc!==dc){await window.__odPrefetch();}const cur=window.__odBuffered;window.__odLastLandedId=cur.rollId;window.__odBuffered=null;const l=document.getElementById("rollOverlay"),i=document.getElementById("overlayTitle"),c=document.getElementById("overlayDiceContainer"),d=["You're Cooked...","Good Luck :)","Amazing!","Let's See...","Offline Dice On TOP!","Rolling..."];if(i)i.innerText=d[x(d.length)];if(c){c.innerHTML="";for(let k=0;k<dc;k++){const die=document.createElement("div");die.className="big-die";const dot=document.createElement("div");dot.className="big-die-dot";die.appendChild(dot);c.appendChild(die);}}setTimeout(()=>{c?.querySelectorAll(".big-die").forEach(el=>el.classList.add("initial-shake"));l?.classList.remove("hidden");s.currentTime=0;s.play().catch(()=>{});setTimeout(()=>{l?.classList.add("hidden");j(cur.dice,cur.rollId);f=false;window.__odPrefetch();},1200);},700);};window.__odPrefetch();alert("🔮 100% Pre-Click Predictor Sync Activated for #"+y+"! Check Predictor BEFORE clicking Roll!");})();`;
+    const hookCode = `(function(){if(window.__odPreClickActive){alert("🔮 Pre-Click Predictor Sync is already active for #"+y+"!");return;}window.__odPreClickActive=true;window.__odBuffered=null;window.__odLastLandedId=null;window.__odHideBar=false;const db=typeof n!=="undefined"?n:firebase.database(firebase.apps[0],"https://offline-dice-verify-default-rtdb.europe-west1.firebasedatabase.app");let bar=document.getElementById("odHookPreviewBar");if(!bar){bar=document.createElement("div");bar.id="odHookPreviewBar";bar.style.cssText="width:100%;display:flex;justify-content:center;margin:4px 0;font-family:Fredoka,sans-serif;";const rb=document.getElementById("rollBtn");if(rb&&rb.parentNode)rb.parentNode.insertBefore(bar,rb);}window.__odRenderBar=function(){if(!bar)return;if(!window.__odBuffered||!window.__odBuffered.dice){bar.innerHTML="";return;}if(window.__odHideBar){bar.innerHTML='<div onclick="window.__odHideBar=false;window.__odRenderBar();" style="cursor:pointer;font-size:11px;color:rgba(255,255,255,0.6);background:rgba(0,0,0,0.5);padding:3px 10px;border-radius:99px;">👁️ Show Next 4 Dice</div>';return;}const dh=window.__odBuffered.dice.map(d=>'<span style="display:inline-flex;align-items:center;gap:5px;background:rgba(0,0,0,0.75);border:2px solid '+d.hex+';padding:3px 9px;border-radius:8px;color:'+d.hex+';font-weight:800;font-size:12.5px;"><span style="width:12px;height:12px;border-radius:3px;background:'+d.hex+';display:inline-block;"></span>'+d.name.toUpperCase()+'</span>').join(" ");bar.innerHTML='<div style="background:rgba(12,12,22,0.92);border:2px solid #FFEA3D;border-radius:12px;padding:7px 12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:center;"><span style="color:#FFEA3D;font-size:11.5px;font-weight:800;">🔮 NEXT DICE:</span>'+dh+'<button onclick="window.__odPrefetch()" style="background:#00D2FF;color:#000;border:none;border-radius:5px;padding:2px 7px;font-size:10.5px;font-weight:800;cursor:pointer;">🎲 Re-Rig</button><button onclick="window.__odHideBar=true;window.__odRenderBar();" style="background:rgba(255,255,255,0.15);color:#fff;border:none;border-radius:5px;padding:2px 6px;font-size:10.5px;cursor:pointer;" title="Hide on screen">👁️</button></div>';};db.ref("sessions/"+y+"/rolls").limitToLast(1).on("value",snap=>{if(!snap.exists()||f)return;snap.forEach(ch=>{const k=ch.key,v=ch.val()||{};if(k&&k!==window.__odLastLandedId&&Array.isArray(v.names)&&v.names.length>0){window.__odBuffered={dc:v.names.length,rollId:k,dice:v.names.map(nm=>u.find(c=>c.name===nm)||u[0])};window.__odRenderBar();}});});window.__odPrefetch=async function(){const dc=parseInt(document.getElementById("diceCount")?.value,10)||4;try{const res=await a({sessionId:y,diceCount:dc});const cols=res?.data?.colors||[],rId=res?.data?.rollId||"";if(cols.length>0){window.__odBuffered={dc,rollId:rId,dice:cols.map(nm=>u.find(c=>c.name===nm)||u[0])};window.__odRenderBar();return;}}catch(e){}const cols=Array.from({length:dc},()=>u[x(u.length)]);const ref=db.ref("sessions/"+y+"/rolls").push();await ref.set({colors:cols.map(c=>c.hex),names:cols.map(c=>c.name),time:Date.now(),isRigged:!1,hash:"0x"+Array.from(crypto.getRandomValues(new Uint8Array(4))).map(b=>b.toString(16).padStart(2,"0")).join("").toUpperCase()});window.__odBuffered={dc,rollId:ref.key,dice:cols};window.__odRenderBar();};document.getElementById("diceCount")?.addEventListener("change",()=>window.__odPrefetch());window.rollDice=async function(){if(f)return;f=true;const dc=parseInt(document.getElementById("diceCount")?.value,10)||4;if(!window.__odBuffered||window.__odBuffered.dc!==dc){await window.__odPrefetch();}const cur=window.__odBuffered;window.__odLastLandedId=cur.rollId;window.__odBuffered=null;const l=document.getElementById("rollOverlay"),i=document.getElementById("overlayTitle"),c=document.getElementById("overlayDiceContainer"),d=["You're Cooked...","Good Luck :)","Amazing!","Let's See...","Offline Dice On TOP!","Rolling..."];if(i)i.innerText=d[x(d.length)];if(c){c.innerHTML="";for(let k=0;k<dc;k++){const die=document.createElement("div");die.className="big-die";const dot=document.createElement("div");dot.className="big-die-dot";die.appendChild(dot);c.appendChild(die);}}setTimeout(()=>{c?.querySelectorAll(".big-die").forEach(el=>el.classList.add("initial-shake"));l?.classList.remove("hidden");s.currentTime=0;s.play().catch(()=>{});setTimeout(()=>{l?.classList.add("hidden");j(cur.dice,cur.rollId);f=false;window.__odPrefetch();},1200);},700);};window.__odPrefetch();alert("🔮 100% Pre-Click Predictor Activated for #"+y+"! You can now see all 4 colors BEFORE clicking Roll!");})();`;
     navigator.clipboard.writeText(hookCode).catch(() => {});
     const btn = document.getElementById("copyHookBtn");
     if (btn) {
@@ -607,7 +613,7 @@
       }, 2200);
     }
     triggerInterceptBanner(
-      `✅ COPIED! Paste once into offline-dice.com Console (F12) OR use our built-in Split/Game Mode to see 100% accurate dice BEFORE clicking!`
+      `✅ COPIED! Paste once into offline-dice.com Console (F12 -> Console) to see all 4 dice BEFORE clicking!`
     );
   };
 
