@@ -3473,6 +3473,12 @@ body.blur-active header img[src="offlinetext.png"]:hover {
               <button class="predictor-mini-btn" onclick="syncGameToPredictorId()" title="Force the embedded Offline Dice Game to use this exact ID">
                 🔄 Apply ID to Game
               </button>
+              <button class="predictor-mini-btn" style="border-color:#22C55E; color:#4ADE80;" onclick="openPreSyncedGameTab()" title="Open a standalone Offline Dice Game tab with 100% automatic Pre-Click Prediction">
+                🎮 Open Pre-Synced Game Tab
+              </button>
+              <button id="copyHookBtn" class="predictor-mini-btn" style="border-color:#FFEA3D; color:#FFEA3D;" onclick="copyExternalSitePreClickHook()" title="Copy 1-Click Pre-Roll Sync Hook for external offline-dice.com tab">
+                ⚡ Pre-Click Hook (offline-dice.com)
+              </button>
             </div>
 
             <div class="predictor-quick-btns">
@@ -3510,23 +3516,23 @@ body.blur-active header img[src="offlinetext.png"]:hover {
         <!-- HERO NEXT ROLL PREDICTION STAGE -->
         <div id="predStageCard" class="prediction-stage-card">
           <div id="predInterceptBanner" class="intercept-alert-banner">
-            ⚡ LIVE ROLL INTERCEPTED FROM DATABASE BEFORE ANIMATION ENDS!
+            🔮 NEXT DICE PRE-FETCHED &amp; READY BEFORE YOU CLICK THE DICE!
           </div>
 
           <div class="prediction-stage-top">
             <div>
               <div id="predStageRollBadge" class="prediction-roll-badge">
-                🎯 ROLL #1 — NEXT DICE BEFORE ROLL
+                🔮 PREDICTED BEFORE YOU CLICK — NEXT DICE (100% ACCURATE)
               </div>
               <div id="predStageHash" style="font-size: 11.5px; color: rgba(255,255,255,0.55); font-weight: 700; margin-top: 5px; letter-spacing: 0.8px;">
-                ID SEED HASH: 0x00000000
+                READY BEFORE DICE CLICK • 100% SERVER VERIFIED
               </div>
             </div>
 
             <div class="prediction-roll-stepper">
-              <button class="stepper-btn" onclick="stepPredictionRoll(-1)" title="Inspect Previous Firebase Roll">◀ PREV DB ROLL</button>
-              <button class="stepper-btn" onclick="stepPredictionRoll(0)" style="border-color:#FFEA3D; color:#FFEA3D;" title="Show Active Live / Queued Firebase Roll">⚡ LIVE / QUEUED</button>
-              <button class="stepper-btn" onclick="preQueueNextRollForActiveId()" style="border-color:#00D2FF; color:#00D2FF;" title="Generate & Pre-Queue a New Next Roll in Firebase">🎲 NEW QUEUE</button>
+              <button class="stepper-btn" onclick="stepPredictionRoll(-1)" title="Inspect Previous Landed Roll">◀ PREV LANDED</button>
+              <button class="stepper-btn" onclick="stepPredictionRoll(0)" style="border-color:#FFEA3D; color:#FFEA3D;" title="Show Active Pre-Click Prediction">🔮 NEXT BEFORE CLICK</button>
+              <button class="stepper-btn" onclick="preQueueNextRollForActiveId()" style="border-color:#00D2FF; color:#00D2FF;" title="Pre-Fetch a New Next Roll from Firebase Server Before Clicking">🎲 PRE-FETCH NEW</button>
             </div>
           </div>
 
@@ -3781,6 +3787,8 @@ body.blur-active header img[src="offlinetext.png"]:hover {
         <div style="text-align: center; color: white; font-family: 'Fredoka', sans-serif;">
           ID: <strong id="gameIdDisplay" style="font-size: 20px; letter-spacing: 2px;">LOADING...</strong> - <a href="./verify_html.html" target="_blank" style="color: #FFFFFF; text-decoration: underline; font-weight: 600;" data-i18n="verifyLink">Verify</a>
         </div>
+
+        <div id="gameNextRollPreviewBar" style="width: 100%; display: flex; justify-content: center;"></div>
 
         <button id="rollBtn" class="roll-btn" onclick="rollDice()">
           <span class="stretch-text" data-i18n="rollBtn">ROLL AGAIN !</span>
