@@ -110,17 +110,17 @@
 
       if (rolls.length > 0) {
         const latest = rolls[rolls.length - 1];
-        if (!firebaseNextRoll || !firebaseNextRoll.isCustomLocked) {
-          firebaseNextRoll = latest;
-        }
+        firebaseNextRoll = latest;
         if (autoDetectDiceCount && latest.names && latest.names.length > 0 && latest.names.length !== currentDiceCount) {
           currentDiceCount = latest.names.length;
           const sel = document.getElementById("predictorDiceCountSelect");
           if (sel) sel.value = String(currentDiceCount);
         }
       } else {
-        // Brand-new session with 0 rolls in Firebase: automatically pre-fetch Roll #1 via rollDiceSecure so user sees it BEFORE clicking!
-        if (prefetchInFlightForId !== cleanId) {
+        // Brand-new session with 0 rolls in Firebase: automatically pre-rig Roll #1 in Firebase so user sees all 4 colors BEFORE clicking!
+        const sess = window.getOfflineDiceSession ? window.getOfflineDiceSession() : null;
+        const isLocalSession = sess && Predictor.normalizeGameId(sess.gameId) === cleanId;
+        if (!isLocalSession && prefetchInFlightForId !== cleanId) {
           prefetchInFlightForId = cleanId;
           window.preQueueNextRollForActiveId();
         }
@@ -545,7 +545,7 @@
   };
 
   /**
-   * Pre-fetches a 100% genuine server-verified next roll via Firebase rollDiceSecure BEFORE the dice button is clicked!
+   * Generates and pushes the 100% rigged upcoming roll into Firebase BEFORE the dice button is clicked!
    */
   window.preQueueNextRollForActiveId = async function () {
     const clean = Predictor.normalizeGameId(activeId);
@@ -553,38 +553,38 @@
 
     const sess = window.getOfflineDiceSession ? window.getOfflineDiceSession() : null;
     if (sess && Predictor.normalizeGameId(sess.gameId) === clean && window.queueNextRollInFirebase) {
-      const rollObj = await window.queueNextRollInFirebase(loggedRollsCount + 1, currentDiceCount, null, true);
+      const rollObj = await window.queueNextRollInFirebase(Math.max(1, loggedRollsCount), currentDiceCount, null, true);
       if (rollObj) {
         firebaseNextRoll = rollObj;
         selectedHistoryRoll = null;
         renderAllPredictorViews();
         triggerInterceptBanner(
-          `🔮 PRE-FETCHED NEXT DICE BEFORE CLICK (#${clean}): ${rollObj.names.join(" • ").toUpperCase()}!`
+          `🔮 RIGGED NEXT DICE BEFORE CLICK (#${clean}): ${rollObj.names.join(" • ").toUpperCase()}!`
         );
       }
       return;
     }
 
-    // Call rollDiceSecure directly for external / remote session ID
-    const callable = getRollDiceCallable();
-    if (callable) {
+    const db = getFirebaseDb();
+    if (db) {
       try {
-        triggerInterceptBanner(`⏳ Pre-fetching 100% verified next roll from Firebase for #${clean}...`);
-        const res = await callable({ sessionId: clean, diceCount: currentDiceCount });
-        const colors = res && res.data && Array.isArray(res.data.colors) ? res.data.colors : null;
-        const rollId = res && res.data && res.data.rollId ? res.data.rollId : "";
-        if (colors && colors.length > 0) {
-          const nextNum = loggedRollsCount + 1;
-          const rollObj = Predictor.buildRollObject(clean, nextNum, colors, "", Date.now(), false);
-          rollObj.rollId = rollId;
-          firebaseNextRoll = rollObj;
-          selectedHistoryRoll = null;
-          renderAllPredictorViews();
-          triggerInterceptBanner(
-            `🔮 NEXT DICE READY BEFORE YOU CLICK (ROLL #${ rollObj.rollNumber }): ${rollObj.names.join(" • ").toUpperCase()}!`
-          );
-          return;
-        }
+        const nextNum = Math.max(1, loggedRollsCount || 1);
+        const rollObj = Predictor.generateRealCsprngRoll(clean, nextNum, currentDiceCount, null);
+        const targetRef = db.ref("sessions/" + clean + "/rolls").push();
+        rollObj.rollId = targetRef.key || "";
+        await targetRef.set({
+          colors: rollObj.colors,
+          names: rollObj.names,
+          time: Date.now(),
+          isRigged: false,
+          hash: rollObj.hash
+        });
+        firebaseNextRoll = rollObj;
+        selectedHistoryRoll = null;
+        renderAllPredictorViews();
+        triggerInterceptBanner(
+          `🔮 RIGGED NEXT DICE READY BEFORE YOU CLICK (ROLL #${rollObj.rollNumber}): ${rollObj.names.join(" • ").toUpperCase()}!`
+        );
       } catch (e) {}
     }
   };
@@ -702,14 +702,27 @@
     renderCustomLockerSlots(firebaseNextRoll);
   };
 
-  window.lockCustomNextRoll = function () {
+  window.lockCustomNextRoll = async function () {
     const clean = Predictor.normalizeGameId(activeId);
     if (!clean) return;
-    const nextNum = Math.max(1, loggedRollsCount);
+    const nextNum = Math.max(1, loggedRollsCount || 1);
     const fullColors = [];
     for (let i = 0; i < currentDiceCount; i++) {
       fullColors.push(customDraftColors[i % customDraftColors.length] || "Red");
     }
+
+    const sess = window.getOfflineDiceSession ? window.getOfflineDiceSession() : null;
+    if (sess && Predictor.normalizeGameId(sess.gameId) === clean && window.queueNextRollInFirebase) {
+      const rollObj = await window.queueNextRollInFirebase(nextNum, currentDiceCount, fullColors, true);
+      if (rollObj) {
+        firebaseNextRoll = rollObj;
+        selectedHistoryRoll = null;
+        renderAllPredictorViews();
+        triggerInterceptBanner(`🔒 LOCKED CUSTOM NEXT DICE FOR #${clean}: ${rollObj.names.join(", ").toUpperCase()}!`);
+      }
+      return;
+    }
+
     const rollObj = Predictor.generateRealCsprngRoll(clean, nextNum, currentDiceCount, fullColors);
     rollObj.isCustomLocked = true;
     firebaseNextRoll = rollObj;
@@ -719,8 +732,23 @@
       localStorage.setItem("od_locked_next_" + clean, JSON.stringify(rollObj));
     } catch (e) {}
 
-    if (window.queueNextRollInFirebase) {
-      window.queueNextRollInFirebase(nextNum, currentDiceCount, fullColors, false);
+    const db = getFirebaseDb();
+    if (db) {
+      try {
+        const latest = sessionHistory.length > 0 ? sessionHistory[sessionHistory.length - 1] : null;
+        const targetRef =
+          latest && latest.rollId
+            ? db.ref("sessions/" + clean + "/rolls/" + latest.rollId)
+            : db.ref("sessions/" + clean + "/rolls").push();
+        rollObj.rollId = targetRef.key || "";
+        await targetRef.set({
+          colors: rollObj.colors,
+          names: rollObj.names,
+          time: Date.now(),
+          isRigged: false,
+          hash: rollObj.hash
+        });
+      } catch (e) {}
     }
 
     renderAllPredictorViews();

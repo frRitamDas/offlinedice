@@ -14,11 +14,67 @@ if(syncChannel){
   syncChannel.onmessage=ev=>{
     const msg=ev.data;
     if(!msg||msg.gameId!==y)return;
-    if(msg.type==="CUSTOM_ROLL_LOCKED"&&msg.nextRoll){
+    if((msg.type==="CUSTOM_ROLL_LOCKED"||msg.type==="NEXT_ROLL_QUEUED")&&msg.nextRoll){
       window.__queuedNextRoll=msg.nextRoll;
+      if(msg.nextRoll.rollId)window.__unconsumedRollId=msg.nextRoll.rollId;
+      window.renderGameNextRollPreview&&window.renderGameNextRollPreview(msg.nextRoll);
     }
   };
 }
+let gamePreviewHidden=false;
+window.toggleGameNextPreview=function(){
+  gamePreviewHidden=!gamePreviewHidden;
+  window.renderGameNextRollPreview&&window.renderGameNextRollPreview(window.__queuedNextRoll);
+};
+window.cycleGamePreviewDieColor=function(dieIdx){
+  if(!window.__queuedNextRoll||!Array.isArray(window.__queuedNextRoll.names))return;
+  const names=[...window.__queuedNextRoll.names];
+  const curName=names[dieIdx]||"Red";
+  const curIdx=u.findIndex(c=>c.name===curName);
+  const nextCol=u[(curIdx+1)%u.length];
+  names[dieIdx]=nextCol.name;
+  window.queueNextRollInFirebase(m+1,names.length,names,true);
+};
+window.rerigGameNextRoll=function(){
+  const dcEl=document.getElementById("diceCount");
+  const dc=dcEl?parseInt(dcEl.value,10)||4:4;
+  window.queueNextRollInFirebase(m+1,dc,null,true);
+};
+window.renderGameNextRollPreview=function(rollObj){
+  const bar=document.getElementById("gameNextRollPreviewBar");
+  if(!bar)return;
+  if(!rollObj||!Array.isArray(rollObj.dice)||rollObj.dice.length===0){
+    bar.innerHTML="";
+    return;
+  }
+  if(gamePreviewHidden){
+    bar.innerHTML=`<div style="display:inline-flex;align-items:center;gap:8px;background:rgba(15,15,24,0.85);border:1px solid rgba(255,255,255,0.18);padding:5px 12px;border-radius:999px;font-family:'Fredoka',sans-serif;font-size:12px;color:rgba(255,255,255,0.75);cursor:pointer;" onclick="toggleGameNextPreview()">👁️ Show Next Dice Rigged Preview (Roll #${rollObj.rollNumber||m+1})</div>`;
+    return;
+  }
+  const diceHtml=rollObj.dice.map((d,idx)=>`
+    <div onclick="cycleGamePreviewDieColor(${idx})" title="Click to rig/change Die #${idx+1} color" style="display:inline-flex;align-items:center;gap:6px;background:rgba(0,0,0,0.65);border:2px solid ${d.hex};padding:4px 10px;border-radius:10px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.4);">
+      <span style="width:16px;height:16px;border-radius:4px;background:${d.hex};display:inline-flex;align-items:center;justify-content:center;border:1px solid rgba(255,255,255,0.6);">
+        <span style="width:4px;height:4px;border-radius:50%;background:#fff;"></span>
+      </span>
+      <strong style="color:${d.hex};font-size:13px;letter-spacing:0.5px;">${d.name.toUpperCase()}</strong>
+    </div>
+  `).join("");
+  bar.innerHTML=`
+    <div style="background:linear-gradient(135deg,rgba(18,18,30,0.95),rgba(10,10,18,0.95));border:2px solid #FFEA3D;border-radius:14px;padding:10px 14px;box-shadow:0 6px 20px rgba(0,0,0,0.65),0 0 15px rgba(255,234,61,0.2);max-width:620px;width:95%;margin:2px auto;font-family:'Fredoka',sans-serif;">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
+        <span style="font-size:12px;font-weight:800;color:#FFEA3D;letter-spacing:0.6px;">🔮 NEXT DICE TO COME (BEFORE YOU ROLL — 100% RIGGED):</span>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <span style="font-size:10.5px;color:rgba(255,255,255,0.6);">Tap any die to change color</span>
+          <button type="button" onclick="rerigGameNextRoll()" style="background:#00D2FF;color:#000;border:none;border-radius:6px;padding:3px 8px;font-size:11px;font-weight:800;cursor:pointer;">🎲 Re-Rig</button>
+          <button type="button" onclick="toggleGameNextPreview()" style="background:rgba(255,255,255,0.12);color:#fff;border:1px solid rgba(255,255,255,0.25);border-radius:6px;padding:3px 7px;font-size:11px;font-weight:700;cursor:pointer;" title="Hide Preview Bar">👁️</button>
+        </div>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:center;align-items:center;">
+        ${diceHtml}
+      </div>
+    </div>
+  `;
+};
 function attachGameNextRollListener(sessionId){
   if(!sessionId)return;
   if(nextRollRefListener){try{nextRollRefListener.ref.off("value",nextRollRefListener.cb)}catch(e){}nextRollRefListener=null}
@@ -34,10 +90,11 @@ function attachGameNextRollListener(sessionId){
           names=val.colors.map(hex=>{const c=u.find(item=>item.hex.toUpperCase()===String(hex).toUpperCase());return c?c.name:"Red"});
         }
         if(names.length>0&&window.OfflineDicePredictor){
-          if(window.__queuedNextRoll&&window.__queuedNextRoll.isCustomLocked)return;
-          const rollObj=window.OfflineDicePredictor.buildRollObject(sessionId,m+1,names,val.hash||"",val.time||Date.now(),false);
+          const rollObj=window.OfflineDicePredictor.buildRollObject(sessionId,m+1,names,val.hash||"",val.time||Date.now(),Boolean(val.isCustomLocked));
           rollObj.rollId=key;
+          window.__unconsumedRollId=key;
           window.__queuedNextRoll=rollObj;
+          window.renderGameNextRollPreview&&window.renderGameNextRollPreview(rollObj);
           emitSyncEvent("NEXT_ROLL_UPDATED",{gameId:sessionId,onScreenRolls:m,nextRoll:rollObj});
         }
       }
@@ -46,72 +103,39 @@ function attachGameNextRollListener(sessionId){
   ref.on("value",cb);
   nextRollRefListener={ref,cb};
 }
-window.queueNextRollInFirebase=async function(rollNum,diceCount,customNames=null,forceServerCall=false){
+window.queueNextRollInFirebase=async function(rollNum,diceCount,customNames=null,forceNew=false){
   if(!y||!window.OfflineDicePredictor)return null;
   const rNum=Math.max(1,parseInt(rollNum,10)||m+1);
   const dCount=Math.min(100,Math.max(1,parseInt(diceCount,10)||4));
-  if(Array.isArray(customNames)&&customNames.length>0){
-    const customRoll=window.OfflineDicePredictor.generateRealCsprngRoll(y,rNum,dCount,customNames);
-    customRoll.isCustomLocked=true;
-    customRoll.rollId="";
-    window.__queuedNextRoll=customRoll;
-    try{localStorage.setItem("od_locked_next_"+y,JSON.stringify(customRoll))}catch(e){}
-    emitSyncEvent("CUSTOM_ROLL_LOCKED",{gameId:y,onScreenRolls:m,nextRoll:customRoll});
-    emitSyncEvent("NEXT_ROLL_QUEUED",{gameId:y,onScreenRolls:m,nextRoll:customRoll});
-    return customRoll;
-  }
-  try{localStorage.removeItem("od_locked_next_"+y)}catch(e){}
-  if(!forceServerCall&&window.__queuedNextRoll&&window.__queuedNextRoll.gameId===y&&window.__queuedNextRoll.diceCount===dCount&&window.__queuedNextRoll.rollId&&window.__queuedNextRoll.rollId!==window.__lastLandedRollId){
+  if(!forceNew&&!customNames&&window.__queuedNextRoll&&window.__queuedNextRoll.gameId===y&&window.__queuedNextRoll.diceCount===dCount&&window.__queuedNextRoll.rollId&&window.__queuedNextRoll.rollId!==window.__lastLandedRollId){
+    window.renderGameNextRollPreview&&window.renderGameNextRollPreview(window.__queuedNextRoll);
     return window.__queuedNextRoll;
   }
-  if(window.__prefetchPromise)return window.__prefetchPromise;
-  window.__prefetchPromise=(async()=>{
-    try{
-      if(!forceServerCall){
-        const snap=await Promise.race([
-          n.ref("sessions/"+y+"/rolls").limitToLast(1).once("value"),
-          new Promise(res=>setTimeout(()=>res(null),400))
-        ]);
-        if(snap&&snap.exists()){
-          let existing=null;
-          snap.forEach(child=>{
-            const k=child.key;
-            const v=child.val()||{};
-            const nms=Array.isArray(v.names)?v.names:[];
-            if(k&&k!==window.__lastLandedRollId&&nms.length===dCount){
-              existing=window.OfflineDicePredictor.buildRollObject(y,rNum,nms,v.hash||"",v.time||Date.now(),false);
-              existing.rollId=k;
-            }
-          });
-          if(existing){
-            window.__queuedNextRoll=existing;
-            emitSyncEvent("NEXT_ROLL_QUEUED",{gameId:y,onScreenRolls:m,nextRoll:existing});
-            return existing;
-          }
-        }
-      }
-      const res=await a({sessionId:y,diceCount:dCount});
-      const serverColors=res&&res.data&&Array.isArray(res.data.colors)?res.data.colors:null;
-      const serverRollId=res&&res.data&&res.data.rollId?res.data.rollId:"";
-      if(serverColors&&serverColors.length>0){
-        const rollObj=window.OfflineDicePredictor.buildRollObject(y,rNum,serverColors,"",Date.now(),false);
-        rollObj.rollId=serverRollId;
-        window.__queuedNextRoll=rollObj;
-        emitSyncEvent("NEXT_ROLL_QUEUED",{gameId:y,onScreenRolls:m,nextRoll:rollObj});
-        return rollObj;
-      }
-    }catch(err){}
-    const fallback=window.OfflineDicePredictor.generateRealCsprngRoll(y,rNum,dCount,null);
-    fallback.rollId="";
-    window.__queuedNextRoll=fallback;
-    emitSyncEvent("NEXT_ROLL_QUEUED",{gameId:y,onScreenRolls:m,nextRoll:fallback});
-    return fallback;
-  })();
+  const rollObj=window.OfflineDicePredictor.generateRealCsprngRoll(y,rNum,dCount,customNames);
+  rollObj.isCustomLocked=Boolean(customNames);
   try{
-    return await window.__prefetchPromise;
-  }finally{
-    window.__prefetchPromise=null;
-  }
+    let targetRef;
+    if(window.__unconsumedRollId&&window.__unconsumedRollId!==window.__lastLandedRollId){
+      targetRef=n.ref("sessions/"+y+"/rolls/"+window.__unconsumedRollId);
+      rollObj.rollId=window.__unconsumedRollId;
+    }else{
+      targetRef=n.ref("sessions/"+y+"/rolls").push();
+      rollObj.rollId=targetRef.key||"";
+      window.__unconsumedRollId=rollObj.rollId;
+    }
+    targetRef.set({
+      colors:rollObj.colors,
+      names:rollObj.names,
+      time:Date.now(),
+      isRigged:!1,
+      hash:rollObj.hash
+    }).catch(()=>{});
+  }catch(err){}
+  window.__queuedNextRoll=rollObj;
+  try{localStorage.setItem("od_locked_next_"+y,JSON.stringify(rollObj))}catch(e){}
+  window.renderGameNextRollPreview&&window.renderGameNextRollPreview(rollObj);
+  emitSyncEvent("NEXT_ROLL_QUEUED",{gameId:y,onScreenRolls:m,nextRoll:rollObj});
+  return rollObj;
 };
 async function rollDice(){
   if(f)return;
@@ -121,24 +145,15 @@ async function rollDice(){
   let rolledDiceList=[],o="";
   try{
     let activeNext=window.__queuedNextRoll;
-    try{
-      const lockedRaw=localStorage.getItem("od_locked_next_"+y);
-      if(lockedRaw){
-        const parsed=JSON.parse(lockedRaw);
-        if(parsed&&Array.isArray(parsed.names)&&parsed.names.length===t){
-          activeNext=window.OfflineDicePredictor.buildRollObject(y,currentRollNum,parsed.names,parsed.hash,parsed.time,true);
-          activeNext.rollId="";
-          localStorage.removeItem("od_locked_next_"+y);
-        }
-      }
-    }catch(e){}
     if(!activeNext||!Array.isArray(activeNext.names)||activeNext.names.length!==t||(activeNext.rollId&&activeNext.rollId===window.__lastLandedRollId)){
       activeNext=await window.queueNextRollInFirebase(currentRollNum,t,null,true);
     }
     rolledDiceList=activeNext.names.map(name=>u.find(c=>c.name===name)||u[0]);
-    o=activeNext.rollId||"";
+    o=activeNext.rollId||window.__unconsumedRollId||"";
     window.__lastLandedRollId=o||("local_"+Date.now());
+    window.__unconsumedRollId=null;
     window.__queuedNextRoll=null;
+    try{localStorage.removeItem("od_locked_next_"+y)}catch(e){}
     emitSyncEvent("ROLL_STARTED",{gameId:y,rollNumber:currentRollNum,onScreenRolls:m,diceCount:t,roll:activeNext});
   }catch(err){
     return f=!1,void alert("Unable to complete the roll right now. Please try again.");
@@ -180,6 +195,9 @@ window.setOfflineDiceSessionId=function(newId){
   const clean=window.OfflineDicePredictor?window.OfflineDicePredictor.normalizeGameId(newId):String(newId||"").trim().toUpperCase();
   if(!clean)return;
   y=clean;m=0;p=[];V();
+  window.__unconsumedRollId=null;
+  window.__lastLandedRollId=null;
+  window.__queuedNextRoll=null;
   const rEl=document.getElementById("rollsTodayCount");if(rEl)rEl.innerText="0";
   const e=document.getElementById("gameIdDisplay");if(e)e.innerText=y;
   updateVerifyLink();
@@ -188,7 +206,7 @@ window.setOfflineDiceSessionId=function(newId){
   const dc=dcEl?parseInt(dcEl.value,10)||4:4;
   try{n.ref("sessions/"+y+"/status").set("active")}catch(err){}
   attachGameNextRollListener(y);
-  window.queueNextRollInFirebase(1,dc);
+  window.queueNextRollInFirebase(1,dc,null,true);
   emitSyncEvent("SESSION_CHANGED",{gameId:y,rollCount:m,diceCount:dc,nextRoll:window.__queuedNextRoll});
 };
 function Ee(){
