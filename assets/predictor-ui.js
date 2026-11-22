@@ -9,12 +9,15 @@
   let currentDiceCount = 4;
   let autoDetectDiceCount = true;
   let loggedRollsCount = 0;
+  let onScreenRollsCount = 0;
   let soundAlertEnabled = true;
   let sessionHistory = [];
-  let firebaseNextRoll = null; // Exact roll from sessions/<ID>/next_roll
+  let firebaseNextRoll = null; // Exact pre-fetched roll before click
+  let isCurrentlyRollingOnScreen = false;
   let firebaseListeners = [];
   let customDraftColors = [];
   let selectedHistoryRoll = null; // If user clicks a specific past roll to inspect
+  let prefetchInFlightForId = "";
 
   function getDb() {
     if (window.firebaseDbInstance) return window.firebaseDbInstance;
@@ -24,6 +27,16 @@
           window.firebase.apps[0],
           "https://offline-dice-verify-default-rtdb.europe-west1.firebasedatabase.app"
         );
+      }
+    } catch (e) {}
+    return null;
+  }
+
+  function getRollDiceCallable() {
+    if (window.rollDiceSecureCallable) return window.rollDiceSecureCallable;
+    try {
+      if (window.firebase && window.firebase.app) {
+        return window.firebase.app().functions("europe-west1").httpsCallable("rollDiceSecure");
       }
     } catch (e) {}
     return null;
@@ -52,77 +65,11 @@
     }
 
     if (connBadge) {
-      connBadge.innerHTML = `<span class="predictor-status-dot"></span> FIREBASE LIVE CONNECTED (#${cleanId})`;
+      connBadge.innerHTML = `<span class="predictor-status-dot"></span> PRE-CLICK SYNC ACTIVE (#${cleanId})`;
     }
 
-    // 1. Listen to sessions/<cleanId>/next_roll (Pre-queued exact next roll before button click)
-    const nextRollRef = db.ref("sessions/" + cleanId + "/next_roll");
-    const onNextRoll = (snap) => {
-      if (!snap.exists()) {
-        firebaseNextRoll = null;
-        renderAllPredictorViews();
-        return;
-      }
-      const val = snap.val() || {};
-      let names = Array.isArray(val.names) ? val.names : [];
-      if (names.length === 0 && Array.isArray(val.colors)) {
-        names = val.colors.map((hex) => {
-          const c = Predictor.COLOR_BY_HEX[String(hex).toUpperCase()];
-          return c ? c.name : "Red";
-        });
-      }
-      if (names.length > 0) {
-        const rollObj = Predictor.buildRollObject(
-          cleanId,
-          val.rollNumber || loggedRollsCount + 1,
-          names,
-          val.hash || "",
-          val.time || Date.now(),
-          Boolean(val.isCustomLocked)
-        );
-        rollObj.status = val.status || "queued";
-        firebaseNextRoll = rollObj;
-        selectedHistoryRoll = null;
-
-        if (autoDetectDiceCount && names.length !== currentDiceCount) {
-          currentDiceCount = names.length;
-          const sel = document.getElementById("predictorDiceCountSelect");
-          if (sel) sel.value = String(currentDiceCount);
-        }
-
-        if (val.status === "rolling") {
-          triggerInterceptBanner(
-            `⚡ ROLL #${rollObj.rollNumber} CLICKED — LANDING ON EXACT FIREBASE DICE: ${rollObj.names.join(", ")} (1.9s BEFORE SCREEN)!`
-          );
-          if (soundAlertEnabled) Predictor.playAlertPing("intercept");
-        }
-      } else {
-        firebaseNextRoll = null;
-      }
-      renderAllPredictorViews();
-    };
-    nextRollRef.on("value", onNextRoll);
-    firebaseListeners.push({ ref: nextRollRef, event: "value", cb: onNextRoll });
-
-    // 2. Listen to sessions/<cleanId>/meta
-    const metaRef = db.ref("sessions/" + cleanId + "/meta");
-    const onMeta = (snap) => {
-      if (!snap.exists()) return;
-      const meta = snap.val() || {};
-      if (autoDetectDiceCount && meta.diceCount && Number.isFinite(Number(meta.diceCount))) {
-        const dc = Math.min(100, Math.max(1, parseInt(meta.diceCount, 10)));
-        if (dc !== currentDiceCount) {
-          currentDiceCount = dc;
-          const sel = document.getElementById("predictorDiceCountSelect");
-          if (sel) sel.value = String(dc);
-          renderAllPredictorViews();
-        }
-      }
-    };
-    metaRef.on("value", onMeta);
-    firebaseListeners.push({ ref: metaRef, event: "value", cb: onMeta });
-
-    // 3. Listen to sessions/<cleanId>/rolls in real time (catches offline-dice.com rollDiceSecure 1.9s before animation ends!)
+    // Listen to sessions/<cleanId>/rolls in real time
+    // In Pre-Click Buffer mode, the latest entry in sessions/<cleanId>/rolls is pre-fetched BEFORE the user clicks Roll!
     const rollsRef = db.ref("sessions/" + cleanId + "/rolls");
     let initialLoadDone = false;
     let prevCount = 0;
@@ -151,6 +98,7 @@
             false
           );
           built.key = childSnap.key;
+          built.rollId = childSnap.key;
           built.timestamp = timeStr;
           rolls.push(built);
           idx++;
@@ -160,20 +108,30 @@
       sessionHistory = rolls;
       loggedRollsCount = rolls.length;
 
-      if (autoDetectDiceCount && rolls.length > 0) {
-        const lastRoll = rolls[rolls.length - 1];
-        if (lastRoll.names && lastRoll.names.length > 0 && lastRoll.names.length !== currentDiceCount) {
-          currentDiceCount = lastRoll.names.length;
+      if (rolls.length > 0) {
+        const latest = rolls[rolls.length - 1];
+        if (!firebaseNextRoll || !firebaseNextRoll.isCustomLocked) {
+          firebaseNextRoll = latest;
+        }
+        if (autoDetectDiceCount && latest.names && latest.names.length > 0 && latest.names.length !== currentDiceCount) {
+          currentDiceCount = latest.names.length;
           const sel = document.getElementById("predictorDiceCountSelect");
           if (sel) sel.value = String(currentDiceCount);
+        }
+      } else {
+        // Brand-new session with 0 rolls in Firebase: automatically pre-fetch Roll #1 via rollDiceSecure so user sees it BEFORE clicking!
+        if (prefetchInFlightForId !== cleanId) {
+          prefetchInFlightForId = cleanId;
+          window.preQueueNextRollForActiveId();
         }
       }
 
       if (initialLoadDone && rolls.length > prevCount) {
         const latest = rolls[rolls.length - 1];
         selectedHistoryRoll = null;
+        isCurrentlyRollingOnScreen = false;
         triggerInterceptBanner(
-          `⚡ LIVE FIREBASE ROLL #${rolls.length} INTERCEPTED (1.9s BEFORE DICE LAND): ${latest.names.join(" • ").toUpperCase()}!`
+          `🔮 NEXT DICE READY BEFORE YOU CLICK (ROLL #${rolls.length}): ${latest.names.join(" • ").toUpperCase()} — 100% ACCURATE!`
         );
         if (soundAlertEnabled) {
           Predictor.playAlertPing("intercept");
@@ -204,42 +162,56 @@
     interceptTimeout = setTimeout(() => {
       if (banner) banner.classList.remove("show");
       if (stage) stage.classList.remove("intercept-flash");
-    }, 4500);
+    }, 5000);
   }
 
   /**
-   * Determines which 100% REAL Firebase roll to display in the main showcase (NEVER guesses!).
+   * Returns the 100% verified Pre-Click Roll to display in the main showcase,
+   * plus the previous roll currently sitting on the game screen.
    */
   function getActiveFirebaseRollToDisplay() {
     if (selectedHistoryRoll) {
-      return { roll: selectedHistoryRoll, mode: "HISTORY_INSPECT" };
+      return {
+        roll: selectedHistoryRoll,
+        onScreenRoll: sessionHistory.length >= 2 ? sessionHistory[sessionHistory.length - 2] : null,
+        mode: "HISTORY_INSPECT"
+      };
     }
-    // If there is a pre-queued next_roll in Firebase for the upcoming roll (or currently rolling)
-    if (
-      firebaseNextRoll &&
-      firebaseNextRoll.dice &&
-      firebaseNextRoll.dice.length > 0 &&
-      (firebaseNextRoll.rollNumber > loggedRollsCount || firebaseNextRoll.status === "rolling")
-    ) {
+
+    if (firebaseNextRoll && firebaseNextRoll.isCustomLocked) {
       return {
         roll: firebaseNextRoll,
-        mode: firebaseNextRoll.status === "rolling" ? "LIVE_ROLLING_NOW" : "QUEUED_BEFORE_ROLL"
+        onScreenRoll: sessionHistory.length >= 1 ? sessionHistory[sessionHistory.length - 1] : null,
+        mode: isCurrentlyRollingOnScreen ? "LIVE_ROLLING_NOW" : "PRE_CLICK_READY"
       };
     }
-    // Otherwise, if rolls exist in sessions/<ID>/rolls (e.g., from offline-dice.com rollDiceSecure), show the latest exact Firebase roll
+
     if (sessionHistory.length > 0) {
+      const latestBuffered = sessionHistory[sessionHistory.length - 1];
+      const prevOnScreen = sessionHistory.length >= 2 ? sessionHistory[sessionHistory.length - 2] : null;
       return {
-        roll: sessionHistory[sessionHistory.length - 1],
-        mode: "LATEST_FIREBASE_ROLL"
+        roll: latestBuffered,
+        onScreenRoll: prevOnScreen,
+        mode: isCurrentlyRollingOnScreen ? "LIVE_ROLLING_NOW" : "PRE_CLICK_READY"
       };
     }
-    return { roll: null, mode: "WAITING_FOR_FIREBASE" };
+
+    if (firebaseNextRoll && firebaseNextRoll.dice && firebaseNextRoll.dice.length > 0) {
+      return {
+        roll: firebaseNextRoll,
+        onScreenRoll: null,
+        mode: isCurrentlyRollingOnScreen ? "LIVE_ROLLING_NOW" : "PRE_CLICK_READY"
+      };
+    }
+
+    return { roll: null, onScreenRoll: null, mode: "FETCHING_PRE_CLICK" };
   }
 
   function renderAllPredictorViews() {
     const cleanId = Predictor.normalizeGameId(activeId) || "READY";
     const displayState = getActiveFirebaseRollToDisplay();
     const activeRoll = displayState.roll;
+    const onScreenRoll = displayState.onScreenRoll;
 
     // Update Telemetry Strip
     const elId = document.getElementById("telActiveId");
@@ -248,16 +220,19 @@
     const elDiceCount = document.getElementById("telDiceCount");
 
     if (elId) elId.textContent = "#" + cleanId;
-    if (elLogged) elLogged.textContent = `${loggedRollsCount} Logged in DB`;
+    if (elLogged) {
+      const landedCount = Math.max(0, sessionHistory.length - 1);
+      elLogged.textContent = `${landedCount} On Screen / ${sessionHistory.length} DB`;
+    }
     if (elTarget) {
-      if (displayState.mode === "QUEUED_BEFORE_ROLL") {
-        elTarget.textContent = `ROLL #${activeRoll.rollNumber} (QUEUED NEXT)`;
-      } else if (displayState.mode === "LIVE_ROLLING_NOW") {
-        elTarget.textContent = `ROLL #${activeRoll.rollNumber} (ROLLING NOW!)`;
-      } else if (displayState.mode === "LATEST_FIREBASE_ROLL") {
-        elTarget.textContent = `ROLL #${activeRoll.rollNumber} (LIVE DB)`;
+      if (displayState.mode === "PRE_CLICK_READY" && activeRoll) {
+        elTarget.textContent = `NEXT ROLL #${activeRoll.rollNumber} (BEFORE CLICK)`;
+      } else if (displayState.mode === "LIVE_ROLLING_NOW" && activeRoll) {
+        elTarget.textContent = `ROLL #${activeRoll.rollNumber} (LANDING NOW!)`;
+      } else if (displayState.mode === "HISTORY_INSPECT" && activeRoll) {
+        elTarget.textContent = `ROLL #${activeRoll.rollNumber} (INSPECT)`;
       } else {
-        elTarget.textContent = `WAITING FOR ROLL #1`;
+        elTarget.textContent = `PRE-FETCHING #1...`;
       }
     }
     if (elDiceCount) {
@@ -272,55 +247,47 @@
     const breakdownGrid = document.getElementById("predColorBreakdown");
 
     if (!activeRoll) {
-      // Waiting state — NO FAKE GUESSING!
       if (stageBadge) {
-        stageBadge.innerHTML = `📡 LISTENING TO FIREBASE SESSION #${cleanId} — WAITING FOR ROLL`;
+        stageBadge.innerHTML = `⏳ PRE-FETCHING EXACT NEXT DICE FOR #${cleanId} (BEFORE YOU CLICK)...`;
       }
       if (hashBadge) {
-        hashBadge.textContent = `ZERO GUESSING MODE • 100% REAL FIREBASE STREAM`;
+        hashBadge.textContent = `100% SERVER VERIFIED PRE-CLICK ENGINE • FIREBASE rollDiceSecure`;
       }
       if (diceShowcase) {
         diceShowcase.innerHTML = `
           <div style="text-align:center; padding: 18px 16px; max-width: 540px;">
-            <div style="font-size: 16px; font-weight: 800; color: #00D2FF; margin-bottom: 6px;">
-              📡 Connected Live to Firebase Session <span style="color:#FFEA3D;">#${cleanId}</span>
+            <div style="font-size: 16px; font-weight: 800; color: #00D2FF; margin-bottom: 8px;">
+              🔮 Pre-Fetching Exact Next Roll for <span style="color:#FFEA3D;">#${cleanId}</span>...
             </div>
             <div style="font-size: 13px; color: rgba(255,255,255,0.78); line-height: 1.5; margin-bottom: 12px;">
-              Waiting for the next roll in Firebase. The exact millisecond <strong>"ROLL AGAIN !"</strong> is clicked on Offline Dice, the server writes the roll to Firebase <strong>1.9 seconds before the dice land</strong> and the exact colors appear right here!
+              Fetching the upcoming server roll from Firebase so you see the exact colors <strong>before you click "ROLL AGAIN !"</strong>
             </div>
             <button class="predictor-mini-btn" style="border-color:#FFEA3D; color:#FFEA3D; padding:8px 14px; font-size:13px;" onclick="preQueueNextRollForActiveId()">
-              🔮 Pre-Queue Exact Next Roll (#${loggedRollsCount + 1}) in Firebase Now
+              🔮 Pre-Fetch Exact Next Roll (#${loggedRollsCount + 1}) Now
             </button>
           </div>
         `;
       }
       if (seqBar) {
-        seqBar.innerHTML = `<span style="color:rgba(255,255,255,0.65);">No rolls in Firebase for <strong>#${cleanId}</strong> yet. Click "Pre-Queue" above or click "Roll Again !" on the game.</span>`;
+        seqBar.innerHTML = `<span style="color:rgba(255,255,255,0.65);">Connecting to Firebase Pre-Click Buffer for <strong>#${cleanId}</strong>...</span>`;
       }
       if (breakdownGrid) {
         breakdownGrid.innerHTML = "";
       }
     } else {
-      // We have a 100% REAL Firebase roll (either pre-queued in sessions/<ID>/next_roll or live from sessions/<ID>/rolls)!
       if (stageBadge) {
-        if (displayState.mode === "QUEUED_BEFORE_ROLL") {
-          stageBadge.innerHTML = `🔮 EXACT NEXT DICE QUEUED IN FIREBASE — ROLL #${activeRoll.rollNumber} (BEFORE DICE) ${
-            activeRoll.isCustomLocked ? '<span style="color:#FFEA3D;margin-left:6px;">[🔒 LOCKED]</span>' : ""
+        if (displayState.mode === "PRE_CLICK_READY") {
+          stageBadge.innerHTML = `🔮 PREDICTED BEFORE YOU CLICK — NEXT ROLL #${activeRoll.rollNumber} (100% ACCURATE) ${
+            activeRoll.isCustomLocked ? '<span style="color:#FFEA3D;margin-left:6px;">[🔒 CUSTOM LOCKED]</span>' : ""
           }`;
         } else if (displayState.mode === "LIVE_ROLLING_NOW") {
-          stageBadge.innerHTML = `⚡ ROLL #${activeRoll.rollNumber} ROLLING NOW — EXACT DICE LANDING ON SCREEN!`;
-        } else if (displayState.mode === "HISTORY_INSPECT") {
-          stageBadge.innerHTML = `🔍 INSPECTING FIREBASE ROLL #${activeRoll.rollNumber} (FROM DATABASE)`;
+          stageBadge.innerHTML = `🎲 ROLLING NOW ON SCREEN — LANDING ON EXACT PRE-CLICK DICE (#${activeRoll.rollNumber})!`;
         } else {
-          stageBadge.innerHTML = `⚡ EXACT FIREBASE ROLL #${activeRoll.rollNumber} — LIVE FROM DATABASE`;
+          stageBadge.innerHTML = `🔍 INSPECTING VERIFIED ROLL #${activeRoll.rollNumber} (FROM FIREBASE)`;
         }
       }
       if (hashBadge) {
-        const srcText =
-          displayState.mode === "QUEUED_BEFORE_ROLL"
-            ? "SOURCE: FIREBASE sessions/" + cleanId + "/next_roll (READY BEFORE ROLL)"
-            : "SOURCE: FIREBASE sessions/" + cleanId + "/rolls (100% VERIFIED)";
-        hashBadge.textContent = `${srcText} • HASH: ${activeRoll.hash || "LIVE"}`;
+        hashBadge.textContent = `READY BEFORE DICE CLICK • FIREBASE ROLL ID: ${activeRoll.rollId || activeRoll.hash || "VERIFIED"}`;
       }
 
       if (diceShowcase) {
@@ -351,14 +318,27 @@
           .join(" ");
         const moreTxt =
           activeRoll.dice.length > 16 ? ` <span style="color:#aaa;">+${activeRoll.dice.length - 16} more</span>` : "";
+
+        const onScreenStripHtml = onScreenRoll
+          ? `<div style="width:100%;margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.12);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;font-size:12px;">
+               <span style="color:#4ADE80;font-weight:800;">✅ CURRENTLY ON GAME SCREEN (ROLL #${onScreenRoll.rollNumber}): <strong style="color:#FFF;">${onScreenRoll.names.join(" • ").toUpperCase()}</strong></span>
+               <span style="color:#FFEA3D;font-weight:800;">👆 ABOVE = NEXT DICE WHEN YOU CLICK "ROLL AGAIN !"</span>
+             </div>`
+          : `<div style="width:100%;margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,0.12);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;font-size:12px;">
+               <span style="color:#4ADE80;font-weight:800;">✅ PRE-CLICK BUFFER READY: These exact dice will land on your next click of "ROLL AGAIN !"</span>
+             </div>`;
+
         seqBar.innerHTML = `
-          <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;">
-            <span style="color:#FFEA3D;font-weight:800;margin-right:4px;">EXACT COLORS:</span>
-            ${seqHtml}${moreTxt}
+          <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;width:100%;justify-content:space-between;">
+            <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;">
+              <span style="color:#FFEA3D;font-weight:800;margin-right:4px;">NEXT DICE (BEFORE CLICK):</span>
+              ${seqHtml}${moreTxt}
+            </div>
+            <div style="color:#00D2FF;font-weight:800;font-size:12.5px;">
+              DOMINANT: <span style="color:#FFF;">${activeRoll.dominantColor.toUpperCase()} (${activeRoll.dominantCount}/${activeRoll.diceCount})</span>
+            </div>
           </div>
-          <div style="color:#00D2FF;font-weight:800;font-size:12.5px;">
-            DOMINANT: <span style="color:#FFF;">${activeRoll.dominantColor.toUpperCase()} (${activeRoll.dominantCount}/${activeRoll.diceCount})</span>
-          </div>
+          ${onScreenStripHtml}
         `;
       }
 
@@ -382,59 +362,24 @@
       }
     }
 
-    // Render Firebase Pre-Queue & Recent Verified Rolls in the lower queue section
-    renderFirebaseQueueAndRecentSection(cleanId);
-
-    // Render Custom Locker Editor Slots
+    renderFirebaseQueueAndRecentSection(cleanId, activeRoll);
     renderCustomLockerSlots(activeRoll);
-
-    // Render Live Session History Feed
     renderSessionHistoryFeed(cleanId);
   }
 
-  function renderFirebaseQueueAndRecentSection(cleanId) {
+  function renderFirebaseQueueAndRecentSection(cleanId, activeRoll) {
     const queueList = document.getElementById("predUpcomingQueueList");
     if (!queueList) return;
     queueList.innerHTML = "";
 
-    // Show Pre-Queued Next Roll from Firebase if available
-    if (firebaseNextRoll && firebaseNextRoll.dice && firebaseNextRoll.dice.length > 0) {
-      const nextItem = document.createElement("div");
-      nextItem.className = "upcoming-roll-item is-next";
-      nextItem.onclick = () => {
-        selectedHistoryRoll = null;
-        renderAllPredictorViews();
-      };
-      const diceBoxes = firebaseNextRoll.dice
-        .slice(0, 14)
-        .map(
-          (d) => `
-          <div class="upcoming-die-box" style="background-color: ${d.hex};" title="Die #${d.dieNumber}: ${d.name}">
-            <div class="upcoming-die-dot"></div>
-          </div>`
-        )
-        .join("");
-      nextItem.innerHTML = `
-        <div style="display:flex;align-items:center;gap:8px;">
-          <strong style="font-size:13.5px;color:#FFEA3D;">NEXT ROLL #${firebaseNextRoll.rollNumber}</strong>
-          <span style="background:#22C55E;color:#000;font-size:10px;font-weight:900;padding:2px 6px;border-radius:4px;text-transform:uppercase;">QUEUED IN FIREBASE (BEFORE ROLL)</span>
-          ${firebaseNextRoll.isCustomLocked ? '<span style="font-size:11px;color:#C084FC;font-weight:800;">🔒 Custom Locked</span>' : ""}
-        </div>
-        <div class="upcoming-mini-dice">${diceBoxes}</div>
-        <div style="font-size:12px;color:#FFFFFF;font-weight:800;">
-          ${firebaseNextRoll.names.slice(0, 6).join(" • ")}
-        </div>
-      `;
-      queueList.appendChild(nextItem);
-    }
-
-    // Show the last 4 real rolls from Firebase sessions/<ID>/rolls
-    const recentRolls = [...sessionHistory].reverse().slice(0, 4);
+    const recentRolls = [...sessionHistory].reverse().slice(0, 5);
     recentRolls.forEach((r, idx) => {
+      const isPreClickNext = idx === 0;
+      const isCurrentOnScreen = idx === 1;
       const item = document.createElement("div");
-      item.className = "upcoming-roll-item";
+      item.className = "upcoming-roll-item" + (isPreClickNext ? " is-next" : "");
       item.onclick = () => {
-        selectedHistoryRoll = r;
+        selectedHistoryRoll = isPreClickNext ? null : r;
         renderAllPredictorViews();
       };
       const diceBoxes = r.dice
@@ -446,14 +391,23 @@
           </div>`
         )
         .join("");
+
+      let badgeHtml = "";
+      if (isPreClickNext) {
+        badgeHtml = `<span style="background:#22C55E;color:#000;font-size:10px;font-weight:900;padding:2px 6px;border-radius:4px;text-transform:uppercase;">🔮 NEXT DICE (BEFORE YOU CLICK)</span>`;
+      } else if (isCurrentOnScreen) {
+        badgeHtml = `<span style="background:rgba(0,210,255,0.22);color:#00D2FF;font-size:10px;font-weight:800;padding:2px 6px;border-radius:4px;">✅ CURRENTLY ON SCREEN</span>`;
+      } else {
+        badgeHtml = `<span style="font-size:11px;color:rgba(255,255,255,0.5);">${r.timestamp || ""}</span>`;
+      }
+
       item.innerHTML = `
-        <div style="display:flex;align-items:center;gap:8px;">
-          <strong style="font-size:13.5px;color:#00D2FF;">ROLL #${r.rollNumber}</strong>
-          <span style="font-size:11px;color:rgba(255,255,255,0.55);">${r.timestamp || ""}</span>
-          ${idx === 0 ? '<span style="background:rgba(0,210,255,0.2);color:#00D2FF;font-size:10px;font-weight:800;padding:2px 6px;border-radius:4px;">LATEST DB ROLL</span>' : ""}
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <strong style="font-size:13.5px;color:${isPreClickNext ? "#FFEA3D" : "#00D2FF"};">ROLL #${r.rollNumber}</strong>
+          ${badgeHtml}
         </div>
         <div class="upcoming-mini-dice">${diceBoxes}</div>
-        <div style="font-size:12px;color:rgba(255,255,255,0.85);font-weight:700;">
+        <div style="font-size:12px;color:#FFFFFF;font-weight:800;">
           ${r.names.slice(0, 6).join(" • ")}
         </div>
       `;
@@ -463,7 +417,7 @@
     if (queueList.children.length === 0) {
       queueList.innerHTML = `
         <div style="padding:12px;text-align:center;color:rgba(255,255,255,0.6);font-size:12.5px;">
-          Waiting for Firebase activity on session <strong>#${cleanId}</strong>...
+          Pre-fetching first roll for session <strong>#${cleanId}</strong>...
         </div>
       `;
     }
@@ -485,7 +439,7 @@
     }
 
     const rollNumSpan = document.getElementById("lockerTargetRollLabel");
-    if (rollNumSpan) rollNumSpan.textContent = `Next Roll #${loggedRollsCount + 1}`;
+    if (rollNumSpan) rollNumSpan.textContent = `Next Roll #${Math.max(1, loggedRollsCount)}`;
 
     container.innerHTML = "";
     customDraftColors.forEach((colName, idx) => {
@@ -519,7 +473,7 @@
     if (sessionHistory.length === 0) {
       listEl.innerHTML = `
         <div style="padding: 18px; text-align: center; color: rgba(255,255,255,0.6); font-size: 13px; background: rgba(0,0,0,0.35); border-radius: 10px;">
-          No completed rolls in Firebase for <strong>#${cleanId}</strong> yet.
+          No rolls in Firebase for <strong>#${cleanId}</strong> yet. Click "🔮 Pre-Fetch Next Roll" to buffer Roll #1 before clicking!
         </div>
       `;
       return;
@@ -531,7 +485,7 @@
       const row = document.createElement("div");
       row.className = "upcoming-roll-item" + (idx === 0 ? " is-next" : "");
       row.onclick = () => {
-        selectedHistoryRoll = item;
+        selectedHistoryRoll = idx === 0 ? null : item;
         renderAllPredictorViews();
       };
       const diceHtml = (item.names || [])
@@ -547,7 +501,9 @@
           <span style="font-size:11px;color:rgba(255,255,255,0.5);">${item.timestamp}</span>
         </div>
         <div class="upcoming-mini-dice">${diceHtml}</div>
-        <span style="font-size:11px;color:#4ADE80;font-weight:800;">✅ FIREBASE DB</span>
+        <span style="font-size:11px;color:${idx === 0 ? "#FFEA3D" : "#4ADE80"};font-weight:800;">
+          ${idx === 0 ? "🔮 PRE-FETCHED NEXT" : "✅ LANDED"}
+        </span>
       `;
       listEl.appendChild(row);
     });
@@ -568,11 +524,11 @@
     sessionHistory = [];
     loggedRollsCount = 0;
     firebaseNextRoll = null;
+    prefetchInFlightForId = "";
 
-    // Check if this ID matches our active local Game session
     const gameSess = window.getOfflineDiceSession ? window.getOfflineDiceSession() : null;
     if (gameSess && Predictor.normalizeGameId(gameSess.gameId) === clean) {
-      loggedRollsCount = gameSess.rollCount || 0;
+      onScreenRollsCount = gameSess.rollCount || 0;
       if (gameSess.queuedNextRoll) {
         firebaseNextRoll = gameSess.queuedNextRoll;
       }
@@ -588,30 +544,71 @@
     renderAllPredictorViews();
   };
 
-  window.preQueueNextRollForActiveId = function () {
+  /**
+   * Pre-fetches a 100% genuine server-verified next roll via Firebase rollDiceSecure BEFORE the dice button is clicked!
+   */
+  window.preQueueNextRollForActiveId = async function () {
     const clean = Predictor.normalizeGameId(activeId);
     if (!clean) return;
-    const nextNum = loggedRollsCount + 1;
-    const rollObj = Predictor.generateRealCsprngRoll(clean, nextNum, currentDiceCount, null);
-    firebaseNextRoll = rollObj;
-    selectedHistoryRoll = null;
-    const db = getDb();
-    if (db) {
-      db.ref("sessions/" + clean + "/next_roll")
-        .set({
-          colors: rollObj.colors,
-          names: rollObj.names,
-          rollNumber: nextNum,
-          diceCount: currentDiceCount,
-          hash: rollObj.hash,
-          isCustomLocked: false,
-          status: "queued",
-          time: Date.now()
-        })
-        .catch(() => {});
+
+    const sess = window.getOfflineDiceSession ? window.getOfflineDiceSession() : null;
+    if (sess && Predictor.normalizeGameId(sess.gameId) === clean && window.queueNextRollInFirebase) {
+      const rollObj = await window.queueNextRollInFirebase(loggedRollsCount + 1, currentDiceCount, null, true);
+      if (rollObj) {
+        firebaseNextRoll = rollObj;
+        selectedHistoryRoll = null;
+        renderAllPredictorViews();
+        triggerInterceptBanner(
+          `🔮 PRE-FETCHED NEXT DICE BEFORE CLICK (#${clean}): ${rollObj.names.join(" • ").toUpperCase()}!`
+        );
+      }
+      return;
     }
-    renderAllPredictorViews();
-    triggerInterceptBanner(`🔮 NEXT ROLL #${nextNum} QUEUED IN FIREBASE FOR #${clean}: ${rollObj.names.join(", ")}!`);
+
+    // Call rollDiceSecure directly for external / remote session ID
+    const callable = getRollDiceCallable();
+    if (callable) {
+      try {
+        triggerInterceptBanner(`⏳ Pre-fetching 100% verified next roll from Firebase for #${clean}...`);
+        const res = await callable({ sessionId: clean, diceCount: currentDiceCount });
+        const colors = res && res.data && Array.isArray(res.data.colors) ? res.data.colors : null;
+        const rollId = res && res.data && res.data.rollId ? res.data.rollId : "";
+        if (colors && colors.length > 0) {
+          const nextNum = loggedRollsCount + 1;
+          const rollObj = Predictor.buildRollObject(clean, nextNum, colors, "", Date.now(), false);
+          rollObj.rollId = rollId;
+          firebaseNextRoll = rollObj;
+          selectedHistoryRoll = null;
+          renderAllPredictorViews();
+          triggerInterceptBanner(
+            `🔮 NEXT DICE READY BEFORE YOU CLICK (ROLL #${ rollObj.rollNumber }): ${rollObj.names.join(" • ").toUpperCase()}!`
+          );
+          return;
+        }
+      } catch (e) {}
+    }
+  };
+
+  window.openPreSyncedGameTab = function () {
+    const clean = Predictor.normalizeGameId(activeId);
+    const url = clean ? `./game.html?id=${encodeURIComponent(clean)}` : `./game.html`;
+    window.open(url, "_blank");
+  };
+
+  window.copyExternalSitePreClickHook = function () {
+    const hookCode = `(function(){if(window.__odPreClickActive){alert("Pre-Click Predictor Sync is already active!");return;}window.__odPreClickActive=true;window.__odBuffered=null;window.__odLastLandedId=null;const db=firebase.database(firebase.apps[0],"https://offline-dice-verify-default-rtdb.europe-west1.firebasedatabase.app");db.ref("sessions/"+y+"/rolls").limitToLast(1).on("value",snap=>{if(!snap.exists()||f)return;snap.forEach(ch=>{const k=ch.key,v=ch.val()||{};if(k&&k!==window.__odLastLandedId&&Array.isArray(v.names)&&v.names.length>0){window.__odBuffered={dc:v.names.length,rollId:k,dice:v.names.map(nm=>u.find(c=>c.name===nm)||u[0])};}});});window.__odPrefetch=async function(){const dc=parseInt(document.getElementById("diceCount")?.value,10)||4;const res=await a({sessionId:y,diceCount:dc});const cols=res?.data?.colors||[],rId=res?.data?.rollId||"";if(cols.length>0){window.__odBuffered={dc,rollId:rId,dice:cols.map(nm=>u.find(c=>c.name===nm)||u[0])};}};document.getElementById("diceCount")?.addEventListener("change",()=>window.__odPrefetch());window.rollDice=async function(){if(f)return;f=true;const dc=parseInt(document.getElementById("diceCount")?.value,10)||4;if(!window.__odBuffered||window.__odBuffered.dc!==dc){await window.__odPrefetch();}const cur=window.__odBuffered;window.__odLastLandedId=cur.rollId;window.__odBuffered=null;const l=document.getElementById("rollOverlay"),i=document.getElementById("overlayTitle"),c=document.getElementById("overlayDiceContainer"),d=["You're Cooked...","Good Luck :)","Amazing!","Let's See...","Offline Dice On TOP!","Rolling..."];if(i)i.innerText=d[x(d.length)];if(c){c.innerHTML="";for(let k=0;k<dc;k++){const die=document.createElement("div");die.className="big-die";const dot=document.createElement("div");dot.className="big-die-dot";die.appendChild(dot);c.appendChild(die);}}setTimeout(()=>{c?.querySelectorAll(".big-die").forEach(el=>el.classList.add("initial-shake"));l?.classList.remove("hidden");s.currentTime=0;s.play().catch(()=>{});setTimeout(()=>{l?.classList.add("hidden");j(cur.dice,cur.rollId);f=false;window.__odPrefetch();},1200);},700);};window.__odPrefetch();alert("🔮 100% Pre-Click Predictor Sync Activated for #"+y+"! Check Predictor BEFORE clicking Roll!");})();`;
+    navigator.clipboard.writeText(hookCode).catch(() => {});
+    const btn = document.getElementById("copyHookBtn");
+    if (btn) {
+      const old = btn.innerText;
+      btn.innerText = "✅ PRE-CLICK HOOK COPIED!";
+      setTimeout(() => {
+        btn.innerText = old;
+      }, 2200);
+    }
+    triggerInterceptBanner(
+      `✅ COPIED! Paste once into offline-dice.com Console (F12) OR use our built-in Split/Game Mode to see 100% accurate dice BEFORE clicking!`
+    );
   };
 
   window.syncWithActiveGameSession = function () {
@@ -675,12 +672,8 @@
         if (gameDc) {
           gameDc.value = String(currentDiceCount);
         }
-        if (window.queueNextRollInFirebase) {
-          window.queueNextRollInFirebase(loggedRollsCount + 1, currentDiceCount);
-        }
-      } else if (firebaseNextRoll) {
-        window.preQueueNextRollForActiveId();
       }
+      window.preQueueNextRollForActiveId();
     }
     customDraftColors = [];
     renderAllPredictorViews();
@@ -694,11 +687,11 @@
     }
     if (sessionHistory.length === 0) return;
     if (!selectedHistoryRoll) {
-      selectedHistoryRoll = sessionHistory[sessionHistory.length - 1];
+      selectedHistoryRoll = sessionHistory[Math.max(0, sessionHistory.length - 2)];
     } else {
       const idx = sessionHistory.findIndex((r) => r.rollNumber === selectedHistoryRoll.rollNumber);
       const nextIdx = Math.min(sessionHistory.length - 1, Math.max(0, idx + delta));
-      selectedHistoryRoll = sessionHistory[nextIdx];
+      selectedHistoryRoll = nextIdx === sessionHistory.length - 1 ? null : sessionHistory[nextIdx];
     }
     renderAllPredictorViews();
   };
@@ -712,42 +705,36 @@
   window.lockCustomNextRoll = function () {
     const clean = Predictor.normalizeGameId(activeId);
     if (!clean) return;
-    const nextNum = loggedRollsCount + 1;
+    const nextNum = Math.max(1, loggedRollsCount);
     const fullColors = [];
     for (let i = 0; i < currentDiceCount; i++) {
       fullColors.push(customDraftColors[i % customDraftColors.length] || "Red");
     }
     const rollObj = Predictor.generateRealCsprngRoll(clean, nextNum, currentDiceCount, fullColors);
+    rollObj.isCustomLocked = true;
     firebaseNextRoll = rollObj;
     selectedHistoryRoll = null;
 
-    // Also update local Game if same ID
-    const sess = window.getOfflineDiceSession ? window.getOfflineDiceSession() : null;
-    if (sess && Predictor.normalizeGameId(sess.gameId) === clean && window.queueNextRollInFirebase) {
-      window.queueNextRollInFirebase(nextNum, currentDiceCount, fullColors);
-    } else {
-      const db = getDb();
-      if (db) {
-        db.ref(`sessions/${clean}/next_roll`)
-          .set({
-            colors: rollObj.colors,
-            names: rollObj.names,
-            rollNumber: nextNum,
-            diceCount: currentDiceCount,
-            hash: rollObj.hash,
-            isCustomLocked: true,
-            status: "queued",
-            time: Date.now()
-          })
-          .catch(() => {});
-      }
+    try {
+      localStorage.setItem("od_locked_next_" + clean, JSON.stringify(rollObj));
+    } catch (e) {}
+
+    if (window.queueNextRollInFirebase) {
+      window.queueNextRollInFirebase(nextNum, currentDiceCount, fullColors, false);
     }
 
     renderAllPredictorViews();
-    triggerInterceptBanner(`🔒 LOCKED EXACT NEXT DICE IN FIREBASE FOR #${clean}: ${rollObj.names.join(", ")}!`);
+    triggerInterceptBanner(`🔒 LOCKED CUSTOM NEXT DICE FOR #${clean}: ${rollObj.names.join(", ").toUpperCase()}!`);
   };
 
   window.clearCustomNextRoll = function () {
+    const clean = Predictor.normalizeGameId(activeId);
+    if (clean) {
+      try {
+        localStorage.removeItem("od_locked_next_" + clean);
+      } catch (e) {}
+    }
+    if (firebaseNextRoll) firebaseNextRoll.isCustomLocked = false;
     window.preQueueNextRollForActiveId();
   };
 
@@ -791,9 +778,10 @@
     }
     if (cleanMsgId !== Predictor.normalizeGameId(activeId)) return;
 
-    if (msg.type === "NEXT_ROLL_QUEUED" || msg.type === "NEXT_ROLL_UPDATED") {
+    if (msg.type === "NEXT_ROLL_QUEUED" || msg.type === "NEXT_ROLL_UPDATED" || msg.type === "CUSTOM_ROLL_LOCKED") {
       if (msg.nextRoll) {
         firebaseNextRoll = msg.nextRoll;
+        isCurrentlyRollingOnScreen = false;
         selectedHistoryRoll = null;
         renderAllPredictorViews();
       }
@@ -805,23 +793,22 @@
       customDraftColors = [];
       renderAllPredictorViews();
     } else if (msg.type === "ROLL_STARTED") {
-      if (msg.roll) {
-        firebaseNextRoll = { ...msg.roll, status: "rolling" };
-      }
+      isCurrentlyRollingOnScreen = true;
       selectedHistoryRoll = null;
       triggerInterceptBanner(
-        `⚡ ROLL #${msg.rollNumber} CLICKED — LANDING ON EXACT FIREBASE DICE (${msg.roll.names.join(", ")}) IN 1.9s!`
+        `🎲 DICE CLICKED — LANDING ON YOUR PRE-CLICK PREDICTION (${msg.roll.names.join(" • ").toUpperCase()})!`
       );
       if (soundAlertEnabled) Predictor.playAlertPing("intercept");
       renderAllPredictorViews();
     } else if (msg.type === "ROLL_COMPLETED") {
-      loggedRollsCount = msg.rollNumber;
+      isCurrentlyRollingOnScreen = false;
+      onScreenRollsCount = msg.rollNumber || onScreenRollsCount + 1;
       selectedHistoryRoll = null;
       customDraftColors = [];
       renderAllPredictorViews();
     } else if (msg.type === "SESSION_INIT" || msg.type === "SESSION_CHANGED") {
       if (msg.diceCount) currentDiceCount = msg.diceCount;
-      loggedRollsCount = msg.rollCount || 0;
+      onScreenRollsCount = msg.rollCount || 0;
       if (msg.nextRoll) firebaseNextRoll = msg.nextRoll;
       selectedHistoryRoll = null;
       renderAllPredictorViews();
