@@ -1,0 +1,8 @@
+{
+  "cleanUrls": true,
+  "rewrites": [
+    { "source": "/predictor", "destination": "/index.html" },
+    { "source": "/game", "destination": "/game.html" },
+    { "source": "/verify", "destination": "/verify_html.html" }
+  ]
+}

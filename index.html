@@ -17,7 +17,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="icon" type="image/png" href="icon.png">
   
-  <title>Offline Dice - The Official Streamer Dice Game</title>
+  <title>Offline Dice Predictor - Exact ID-Based Next Dice Predictor</title>
   <meta name="description" content="Play Offline Dice! The ultimate custom color dice simulator used by top TikTok streamers. Roll the dice now!">
   <meta name="robots" content="index, follow">
   
@@ -30,6 +30,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
   <link href="./assets/0_css2" rel="stylesheet">
   <link rel="stylesheet" href="./assets/1_style.css">
+  <link rel="stylesheet" href="./assets/predictor-ui.css">
   
   <style>
     @font-face {
@@ -3397,7 +3398,210 @@ body.blur-active header img[src="offlinetext.png"]:hover {
     </div>
   </div>
 
-  <div class="main-layout">
+  
+  <!-- TOP MODE NAVIGATION BAR -->
+  <div class="od-top-mode-bar">
+    <div class="od-mode-tabs">
+      <button id="modeTabPredictor" class="od-mode-tab active" onclick="switchAppMode('predictor')">
+        🎯 ID DICE PREDICTOR
+      </button>
+      <button id="modeTabSplit" class="od-mode-tab" onclick="switchAppMode('split')">
+        ⚡ LIVE SPLIT TEST (PREDICT + ROLL)
+      </button>
+      <button id="modeTabGame" class="od-mode-tab" onclick="switchAppMode('game')">
+        🎲 OFFLINE DICE GAME
+      </button>
+      <a href="./verify_html.html" target="_blank" class="od-mode-tab">
+        🔍 SESSION VERIFIER
+      </a>
+    </div>
+  </div>
+
+  <!-- OFFLINE DICE ID PREDICTOR ROOT SECTION -->
+  <section id="predictorRootSection" class="predictor-wrapper">
+    <div class="predictor-grid">
+      
+      <!-- LEFT COLUMN: MAIN ID PREDICTOR ENGINE -->
+      <div class="predictor-panel">
+        <div class="predictor-header-banner">
+          <div>
+            <h1 class="predictor-main-title">OFFLINE DICE ID PREDICTOR</h1>
+            <div style="font-size: 13px; color: rgba(255,255,255,0.72); font-weight: 600; margin-top: 4px;">
+              Enter any Offline Dice Session ID to predict the exact upcoming dice colors &amp; order before they roll.
+            </div>
+          </div>
+          <div id="predConnectionBadge" class="predictor-status-pill">
+            <span class="predictor-status-dot"></span> FIREBASE LIVE + ID ENGINE SYNCED
+          </div>
+        </div>
+
+        <!-- ID & DICE COUNT CONTROLS -->
+        <div class="predictor-controls-box">
+          <div class="predictor-input-row">
+            <div class="predictor-id-input-wrap">
+              <span class="predictor-id-prefix">ID #</span>
+              <input
+                type="text"
+                id="predictorIdInput"
+                class="predictor-id-input"
+                placeholder="ENTER GAME ID (E.G. 8F3A91)"
+                autocomplete="off"
+                spellcheck="false"
+              >
+            </div>
+
+            <select id="predictorDiceCountSelect" class="predictor-select" onchange="handlePredictorDiceCountChange(this.value)">
+              <option value="4" selected>4 DICE</option>
+            </select>
+
+            <button id="predictActionBtn" class="predictor-btn-primary" onclick="applyPredictorGameId()">
+              🔮 PREDICT NEXT DICE !
+            </button>
+          </div>
+
+          <div class="predictor-quick-row">
+            <div class="predictor-quick-btns">
+              <button class="predictor-mini-btn" onclick="syncWithActiveGameSession()" title="Pull the active Session ID from the Offline Dice Game">
+                🎯 Use Active Game ID
+              </button>
+              <button class="predictor-mini-btn" onclick="pasteGameIdFromClipboard()">
+                📋 Paste ID
+              </button>
+              <button id="copyIdBtn" class="predictor-mini-btn" onclick="copyActivePredictorId()">
+                🔗 Copy ID
+              </button>
+              <button class="predictor-mini-btn" onclick="syncGameToPredictorId()" title="Force the embedded Offline Dice Game to use this exact ID">
+                🔄 Apply ID to Game
+              </button>
+            </div>
+
+            <div class="predictor-quick-btns">
+              <span style="font-size: 11.5px; color: rgba(255,255,255,0.6); font-weight: 700;">QUICK DICE:</span>
+              <button class="predictor-mini-btn" onclick="document.getElementById('predictorDiceCountSelect').value='1';handlePredictorDiceCountChange('1')">1</button>
+              <button class="predictor-mini-btn" onclick="document.getElementById('predictorDiceCountSelect').value='2';handlePredictorDiceCountChange('2')">2</button>
+              <button class="predictor-mini-btn" onclick="document.getElementById('predictorDiceCountSelect').value='3';handlePredictorDiceCountChange('3')">3</button>
+              <button class="predictor-mini-btn" onclick="document.getElementById('predictorDiceCountSelect').value='4';handlePredictorDiceCountChange('4')">4</button>
+              <button class="predictor-mini-btn" onclick="document.getElementById('predictorDiceCountSelect').value='6';handlePredictorDiceCountChange('6')">6</button>
+              <button class="predictor-mini-btn" onclick="document.getElementById('predictorDiceCountSelect').value='12';handlePredictorDiceCountChange('12')">12</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- SESSION TELEMETRY STRIP -->
+        <div class="predictor-telemetry-bar">
+          <div class="telemetry-card">
+            <span class="telemetry-label">TARGET SESSION ID</span>
+            <span id="telActiveId" class="telemetry-value" style="color: #00D2FF;">#LOADING</span>
+          </div>
+          <div class="telemetry-card" style="border-left-color: #FFEA3D;">
+            <span class="telemetry-label">PREDICTING ROLL</span>
+            <span id="telTargetRoll" class="telemetry-value" style="color: #FFEA3D;">ROLL #1 (NEXT)</span>
+          </div>
+          <div class="telemetry-card" style="border-left-color: #22C55E;">
+            <span class="telemetry-label">SESSION HISTORY</span>
+            <span id="telRollsLogged" class="telemetry-value" style="color: #4ADE80;">0 Rolled</span>
+          </div>
+          <div class="telemetry-card" style="border-left-color: #A855F7;">
+            <span class="telemetry-label">ACTIVE DICE SETUP</span>
+            <span id="telDiceCount" class="telemetry-value" style="color: #C084FC;">4 DICE</span>
+          </div>
+        </div>
+
+        <!-- HERO NEXT ROLL PREDICTION STAGE -->
+        <div id="predStageCard" class="prediction-stage-card">
+          <div id="predInterceptBanner" class="intercept-alert-banner">
+            ⚡ LIVE ROLL INTERCEPTED FROM DATABASE BEFORE ANIMATION ENDS!
+          </div>
+
+          <div class="prediction-stage-top">
+            <div>
+              <div id="predStageRollBadge" class="prediction-roll-badge">
+                🎯 ROLL #1 — NEXT DICE BEFORE ROLL
+              </div>
+              <div id="predStageHash" style="font-size: 11.5px; color: rgba(255,255,255,0.55); font-weight: 700; margin-top: 5px; letter-spacing: 0.8px;">
+                ID SEED HASH: 0x00000000
+              </div>
+            </div>
+
+            <div class="prediction-roll-stepper">
+              <button class="stepper-btn" onclick="stepPredictionRoll(-1)" title="Inspect Previous Firebase Roll">◀ PREV DB ROLL</button>
+              <button class="stepper-btn" onclick="stepPredictionRoll(0)" style="border-color:#FFEA3D; color:#FFEA3D;" title="Show Active Live / Queued Firebase Roll">⚡ LIVE / QUEUED</button>
+              <button class="stepper-btn" onclick="preQueueNextRollForActiveId()" style="border-color:#00D2FF; color:#00D2FF;" title="Generate & Pre-Queue a New Next Roll in Firebase">🎲 NEW QUEUE</button>
+            </div>
+          </div>
+
+          <!-- EXACT PREDICTED COLORED DICE -->
+          <div id="predDiceShowcase" class="predicted-dice-showcase"></div>
+
+          <!-- EXACT ORDER SEQUENCE BAR -->
+          <div id="predSequenceText" class="prediction-sequence-bar"></div>
+
+          <!-- 6-COLOR PROBABILITY & COUNT BREAKDOWN -->
+          <div id="predColorBreakdown" class="color-breakdown-grid"></div>
+        </div>
+
+        <!-- LIVE FIREBASE QUEUE & VERIFIED STREAM -->
+        <div class="upcoming-queue-section">
+          <div class="section-sub-header">
+            <span>📡 FIREBASE PRE-QUEUED NEXT ROLL &amp; VERIFIED ROLLS</span>
+            <span style="font-size: 12px; color: rgba(255,255,255,0.65); font-family: Fredoka, sans-serif;">100% Real Firebase Data (Zero Guessing)</span>
+          </div>
+          <div id="predUpcomingQueueList" class="upcoming-queue-list"></div>
+        </div>
+
+      </div>
+
+      <!-- RIGHT COLUMN: CUSTOM NEXT-ROLL LOCKER & LIVE DATABASE FEED -->
+      <div style="display: flex; flex-direction: column; gap: 16px;">
+        
+        <!-- CUSTOM NEXT-ROLL LOCKER / CONTROLLER -->
+        <div class="predictor-panel">
+          <div class="section-sub-header" style="margin-bottom: 6px; color: #C084FC;">
+            <span>🎛️ FORCE / LOCK NEXT DICE</span>
+            <span id="lockerTargetRollLabel" style="font-size: 12px; color: #FFEA3D; font-family: Fredoka, sans-serif;">Roll #1</span>
+          </div>
+          <p style="font-size: 12px; color: rgba(255,255,255,0.7); margin: 0 0 10px 0; line-height: 1.4;">
+            Want to force a specific dice outcome for this ID? Tap any die below to cycle its color, then click <strong>LOCK DICE</strong>.
+          </p>
+
+          <div class="custom-locker-box">
+            <div id="lockerDiceSlots" class="locker-dice-editor"></div>
+
+            <div style="display: flex; flex-wrap: wrap; gap: 5px; justify-content: center; margin-bottom: 10px;">
+              <button class="predictor-mini-btn" style="border-color:#FF0000;color:#FF6666;" onclick="setAllLockerColor('Red')">All Red</button>
+              <button class="predictor-mini-btn" style="border-color:#FFA500;color:#FFB84D;" onclick="setAllLockerColor('Orange')">All Orange</button>
+              <button class="predictor-mini-btn" style="border-color:#FFD700;color:#FFE666;" onclick="setAllLockerColor('Yellow')">All Yellow</button>
+              <button class="predictor-mini-btn" style="border-color:#008000;color:#4ADE80;" onclick="setAllLockerColor('Green')">All Green</button>
+              <button class="predictor-mini-btn" style="border-color:#0000FF;color:#60A5FA;" onclick="setAllLockerColor('Blue')">All Blue</button>
+              <button class="predictor-mini-btn" style="border-color:#800080;color:#D8B4FE;" onclick="setAllLockerColor('Purple')">All Purple</button>
+            </div>
+
+            <div style="display: flex; gap: 8px;">
+              <button class="predictor-btn-primary" style="flex:1; font-size: 14px; padding: 10px;" onclick="lockCustomNextRoll()">
+                🔒 LOCK DICE FOR ID
+              </button>
+              <button class="predictor-mini-btn" onclick="clearCustomNextRoll()" title="Reset to automatic ID seed prediction">
+                ↺ Reset
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- LIVE FIREBASE ROLLS FEED -->
+        <div class="predictor-panel">
+          <div class="section-sub-header">
+            <span>📡 LIVE ID ROLL HISTORY</span>
+            <span id="predHistoryCountBadge" style="font-size: 12px; color: #00D2FF; font-family: Fredoka, sans-serif;">0 Rolls</span>
+          </div>
+          <div id="predSessionHistoryList" class="upcoming-queue-list" style="max-height: 360px; overflow-y: auto;"></div>
+        </div>
+
+      </div>
+
+    </div>
+  </section>
+
+  <div id="gameRootSection" class="main-layout" style="display: none;">
     
     <div style="width: 250px; flex-shrink: 0; display: flex; flex-direction: column; gap: 15px;">
       <aside class="sidebar" style="width: 100%; box-sizing: border-box; height: fit-content;">
@@ -3593,7 +3797,7 @@ body.blur-active header img[src="offlinetext.png"]:hover {
           <div class="counter-center-wrapper">
             <div class="counter-item-selector">
               <div class="selected-item-btn" id="selectedItemBtn" onclick="toggleItemDropdown()">
-                <span class="dropdown-arrow">ג–²</span>
+                <span class="dropdown-arrow">▲</span>
                 <img src="./assets/13_basegarama.png" alt="Selected Item" id="selectedItemImg" class="item-img-display">
               </div>
               <div class="item-dropdown-menu" id="itemDropdownMenu">
@@ -3624,14 +3828,14 @@ body.blur-active header img[src="offlinetext.png"]:hover {
 
         <div class="stats-container">
           <div class="stats-row">
-            <div class="stat-pill">נ² <span data-i18n="rollsToday">Rolls Today:</span> <strong id="rollsTodayCount" style="color: #FFEA3D; font-weight: 800;">0</strong></div>
-            <div class="stat-pill">נ¢ <span data-i18n="usersOnline">Users Online:</span> <strong id="usersOnlineCount" style="color: #22C55E; font-weight: 800;">0</strong></div>
+            <div class="stat-pill">🎲 <span data-i18n="rollsToday">Rolls Today:</span> <strong id="rollsTodayCount" style="color: #FFEA3D; font-weight: 800;">0</strong></div>
+            <div class="stat-pill">🟢 <span data-i18n="usersOnline">Users Online:</span> <strong id="usersOnlineCount" style="color: #22C55E; font-weight: 800;">0</strong></div>
           </div>
 
           <!-- GLOBAL DICE GOAL CARD -->
           <div class="global-goal-card">
             <div class="global-goal-header">
-              <span>נ <span data-i18n="globalGoalTitle">Global Goal:</span> 250,000 <span data-i18n="diceRolledText">Dice Rolled</span></span>
+              <span>🌍 <span data-i18n="globalGoalTitle">Global Goal:</span> 250,000 <span data-i18n="diceRolledText">Dice Rolled</span></span>
               <strong id="globalGoalPercent" style="color: #00D2FF;">0%</strong>
             </div>
             <div class="goal-bar-bg">
@@ -3692,7 +3896,7 @@ body.blur-active header img[src="offlinetext.png"]:hover {
 
           <div class="wheel-controls-panel">
             <div class="wheel-panel-header">
-              <span class="wheel-panel-title">נ‘¥ NAMES &amp; ENTRIES</span>
+              <span class="wheel-panel-title">👥 NAMES &amp; ENTRIES</span>
               <span id="wheelEntryCountBadge" class="wheel-count-badge">0 / 100</span>
             </div>
 
@@ -3701,49 +3905,49 @@ Player 2
 Player 3" oninput="updateWheelEntries()"></textarea>
 
             <div class="wheel-quick-actions">
-              <button class="wheel-action-btn" onclick="shuffleWheelEntries()">נ”€ Shuffle</button>
-              <button class="wheel-action-btn" onclick="sortWheelEntries()">נ”₪ Sort A-Z</button>
-              <button class="wheel-action-btn" onclick="deduplicateWheelEntries()">ג¨ Unique</button>
-              <button class="wheel-action-btn" onclick="loadSampleWheelEntries()">נ“‹ Samples</button>
-              <button class="wheel-action-btn clear-btn" onclick="clearWheelEntries()">נ—‘ן¸ Clear</button>
+              <button class="wheel-action-btn" onclick="shuffleWheelEntries()">🔀 Shuffle</button>
+              <button class="wheel-action-btn" onclick="sortWheelEntries()">🔤 Sort A-Z</button>
+              <button class="wheel-action-btn" onclick="deduplicateWheelEntries()">✨ Unique</button>
+              <button class="wheel-action-btn" onclick="loadSampleWheelEntries()">📋 Samples</button>
+              <button class="wheel-action-btn clear-btn" onclick="clearWheelEntries()">🗑️ Clear</button>
             </div>
 
             <div class="wheel-settings-section">
-              <div class="section-badge">ג™ן¸ SPIN PHYSICS</div>
+              <div class="section-badge">⚙️ SPIN PHYSICS</div>
               <div class="wheel-settings-grid">
                 <div class="wheel-setting-card">
                   <label for="wheelDurationSelect">Spin Duration</label>
                   <select id="wheelDurationSelect" class="wheel-select">
-                    <option value="3">ג¡ 3 Seconds (Fast)</option>
-                    <option value="5" selected="">ג±ן¸ 5 Seconds (Standard)</option>
-                    <option value="8">ג³ 8 Seconds (Dramatic)</option>
-                    <option value="10">נ­ 10 Seconds (Showcase)</option>
-                    <option value="15">נ¬ 15 Seconds (Epic)</option>
+                    <option value="3">⚡ 3 Seconds (Fast)</option>
+                    <option value="5" selected="">⏱️ 5 Seconds (Standard)</option>
+                    <option value="8">⏳ 8 Seconds (Dramatic)</option>
+                    <option value="10">🎭 10 Seconds (Showcase)</option>
+                    <option value="15">🎬 15 Seconds (Epic)</option>
                   </select>
                 </div>
 
                 <div class="wheel-setting-card">
                   <label for="wheelEasingSelect">Deceleration Style</label>
                   <select id="wheelEasingSelect" class="wheel-select">
-                    <option value="smooth" selected="">נ Smooth Glide</option>
-                    <option value="bouncy">נ’¥ Bouncy Friction</option>
-                    <option value="sudden">נ›‘ Sudden Stop</option>
+                    <option value="smooth" selected="">🌊 Smooth Glide</option>
+                    <option value="bouncy">💥 Bouncy Friction</option>
+                    <option value="sudden">🛑 Sudden Stop</option>
                   </select>
                 </div>
               </div>
             </div>
 
             <div class="wheel-settings-section">
-              <div class="section-badge">נ¨ VISUAL CUSTOMIZATION</div>
+              <div class="section-badge">🎨 VISUAL CUSTOMIZATION</div>
               <div class="wheel-settings-grid">
                 <div class="wheel-setting-card">
                   <label for="wheelThemeSelect">Color Palette</label>
                   <select id="wheelThemeSelect" class="wheel-select" onchange="changeWheelTheme()">
-                    <option value="vibrant" selected="">נˆ Vibrant Rainbow</option>
-                    <option value="neon">ג¡ Neon Cyber</option>
-                    <option value="pastel">נ¸ Pastel Soft</option>
-                    <option value="gold">נ‘‘ Gold Luxury</option>
-                    <option value="monochrome">נ–₪ Dark Mono</option>
+                    <option value="vibrant" selected="">🌈 Vibrant Rainbow</option>
+                    <option value="neon">⚡ Neon Cyber</option>
+                    <option value="pastel">🌸 Pastel Soft</option>
+                    <option value="gold">👑 Gold Luxury</option>
+                    <option value="monochrome">🖤 Dark Mono</option>
                   </select>
                 </div>
 
@@ -3775,7 +3979,7 @@ Player 3" oninput="updateWheelEntries()"></textarea>
             </div>
 
             <div class="wheel-settings-section">
-              <div class="section-badge">נ” AUDIO &amp; WINNER RULES</div>
+              <div class="section-badge">🔊 AUDIO &amp; WINNER RULES</div>
               <div class="wheel-settings-grid">
                 <div class="wheel-setting-card full-width">
                   <div class="toggle-switch-row">
@@ -3835,7 +4039,7 @@ Player 3" oninput="updateWheelEntries()"></textarea>
         <div class="streamer-list" id="rightStreamerList">
           <a href="https://www.tiktok.com/@yarchis1" target="_blank" class="streamer-card-link">
             <div class="streamer-card">
-              <img src="./assets/17_yarchispfp.jpg" alt="YARCHIS">
+              <img src="./assets/12_liamkingpfp.jpg" alt="YARCHIS">
               <div>
                 <strong>YARCHIS <img src="./assets/10_verify.png" class="verify-badge" alt="Verified"></strong>
                 <span>@yarchis1</span>
@@ -3855,14 +4059,14 @@ Player 3" oninput="updateWheelEntries()"></textarea>
       <button id="openVipLoginBtn" class="vip-footer-btn" data-i18n="vipLogin">VIP LOGIN</button>
 
       <div class="lang-dropup-container">
-        <button id="langDropupBtn" class="lang-footer-btn" onclick="toggleLangMenu()">נ ENGLISH ג–²</button>
+        <button id="langDropupBtn" class="lang-footer-btn" onclick="toggleLangMenu()">🌐 ENGLISH ▲</button>
         <div id="langDropupMenu" class="lang-dropup-menu">
-          <div class="lang-option" onclick="selectLanguage('en', 'נ ENGLISH ג–²')"><img src="./assets/18_english.png" alt="English" class="lang-flag-img"> English</div>
-          <div class="lang-option" onclick="selectLanguage('id', 'נ INDONESIAN ג–²')"><img src="./assets/19_indonesia.png" alt="Indonesian" class="lang-flag-img"> Indonesian</div>
-          <div class="lang-option" onclick="selectLanguage('fr', 'נ FRANֳ‡AIS ג–²')"><img src="./assets/20_france.png" alt="Franֳ§ais" class="lang-flag-img"> Franֳ§ais</div>
-          <div class="lang-option" onclick="selectLanguage('ru', 'נ RUSSIAN ג–²')"><img src="./assets/21_russian.png" alt="Russian" class="lang-flag-img"> Russian</div>
-          <div class="lang-option" onclick="selectLanguage('es', 'נ ESPAֳ‘OL ג–²')"><img src="./assets/22_spain.png" alt="Espaֳ±ol" class="lang-flag-img"> Espaֳ±ol</div>
-          <div class="lang-option" onclick="selectLanguage('de', 'נ GERMAN ג–²')"><img src="./assets/23_german.png" alt="German" class="lang-flag-img"> German</div>
+          <div class="lang-option" onclick="selectLanguage('en', '🌐 ENGLISH ▲')"><img src="./assets/18_english.png" alt="English" class="lang-flag-img"> English</div>
+          <div class="lang-option" onclick="selectLanguage('id', '🌐 INDONESIAN ▲')"><img src="./assets/19_indonesia.png" alt="Indonesian" class="lang-flag-img"> Indonesian</div>
+          <div class="lang-option" onclick="selectLanguage('fr', '🌐 FRANÇAIS ▲')"><img src="./assets/20_france.png" alt="Français" class="lang-flag-img"> Français</div>
+          <div class="lang-option" onclick="selectLanguage('ru', '🌐 RUSSIAN ▲')"><img src="./assets/21_russian.png" alt="Russian" class="lang-flag-img"> Russian</div>
+          <div class="lang-option" onclick="selectLanguage('es', '🌐 ESPAÑOL ▲')"><img src="./assets/22_spain.png" alt="Español" class="lang-flag-img"> Español</div>
+          <div class="lang-option" onclick="selectLanguage('de', '🌐 GERMAN ▲')"><img src="./assets/23_german.png" alt="German" class="lang-flag-img"> German</div>
         </div>
       </div>
     </div>
@@ -3874,10 +4078,10 @@ Player 3" oninput="updateWheelEntries()"></textarea>
 
     <!-- BOTTOM RIGHT NEWS TICKER BANNER -->
     <div class="news-ticker-bar">
-      <div class="news-ticker-badge">נ“¢ UPDATES</div>
+      <div class="news-ticker-badge">📢 UPDATES</div>
       <div class="news-ticker-content">
         <div class="news-ticker-text" id="newsTickerText">
-          נ‰ NEW "MENTALIST נ˜¡" BACKGROUND IS NOW LIVE! ג€¢ נ² WELCOME TO OFFLINE DICE ג€” 100% FAIR CSPRNG ROLLS ג€¢ נ€ JOIN OUR DISCORD TO APPLY FOR TOP STREAMER LIST! FOLLOW OUR TIKTOK LINKED IN THE BOTTOM OF THE SCREEN! נ€ 
+          🎉 NEW "MENTALIST 😡" BACKGROUND IS NOW LIVE! • 🎲 WELCOME TO OFFLINE DICE — 100% FAIR CSPRNG ROLLS • 🚀 JOIN OUR DISCORD TO APPLY FOR TOP STREAMER LIST! FOLLOW OUR TIKTOK LINKED IN THE BOTTOM OF THE SCREEN! 🍀 
         </div>
       </div>
     </div>
@@ -3890,7 +4094,7 @@ Player 3" oninput="updateWheelEntries()"></textarea>
 
   <div id="winnerModal" class="winner-modal">
     <div class="winner-card">
-      <h2>נ‰ WINNER! נ‰</h2>
+      <h2>🎉 WINNER! 🎉</h2>
       <div id="winnerNameDisplay" class="winner-name-display">PLAYER 1</div>
       <button class="winner-close-btn" onclick="closeWinnerModal()">CLOSE</button>
     </div>
@@ -3916,12 +4120,12 @@ Player 3" oninput="updateWheelEntries()"></textarea>
     </div>
   </div>
 
-  <div id="successToast" class="success-toast">VIP Access Granted Successfully! נ‰</div>
+  <div id="successToast" class="success-toast">VIP Access Granted Successfully! 🎉</div>
 
   <!-- SYSTEM UPDATE ANNOUNCEMENT MODAL -->
   <div id="resetNoticeModal" class="reset-modal-overlay">
     <div class="reset-modal-card">
-      <div class="reset-modal-icon">ג&nbsp;ן¸</div>
+      <div class="reset-modal-icon">⚠️</div>
       <h2 class="reset-modal-title">SYSTEM UPDATE IN PROGRESS</h2>
       <p class="reset-modal-text">offline dice is about to reset in 5 minutes, sorry for the inconvenience</p>
       <div id="resetCountdownTimer" class="reset-modal-timer">05:00</div>
@@ -3933,7 +4137,9 @@ Player 3" oninput="updateWheelEntries()"></textarea>
   <script data-cfasync="false" src="./assets/3_firebase-app-compat.js"></script>
 <script data-cfasync="false" src="./assets/4_firebase-database-compat.js"></script>
 <script data-cfasync="false" src="./assets/5_firebase-functions-compat.js"></script>
+<script data-cfasync="false" src="./assets/predictor-engine.js"></script>
 <script data-cfasync="false" src="./assets/6_script.js"></script>
+<script data-cfasync="false" src="./assets/predictor-ui.js"></script>
 <script type="module" src="./assets/7_vce701823e78c4301a35b7e07294d87301792088814092" integrity="sha512-UKNk8GbxkABxKcXYuLkO16EleLGUkcvJWtpSNmExE0Too3ZaFAxTscNWEc1OdAv5/BikHawapSCaiD2XCmp+Bw==" data-cf-beacon="{&quot;version&quot;:&quot;2024.11.0&quot;,&quot;token&quot;:&quot;0a764b8f7bb94b8aa1bcda242c533608&quot;,&quot;r&quot;:1,&quot;spa&quot;:2}" crossorigin="anonymous"></script>
 
 </body></html>
