@@ -3473,11 +3473,14 @@ body.blur-active header img[src="offlinetext.png"]:hover {
               <button class="predictor-mini-btn" onclick="syncGameToPredictorId()" title="Force the embedded Offline Dice Game to use this exact ID">
                 🔄 Apply ID to Game
               </button>
-              <button class="predictor-mini-btn" style="border-color:#22C55E; color:#4ADE80;" onclick="openPreSyncedGameTab()" title="Open a standalone Offline Dice Game tab with 100% automatic Pre-Click Prediction">
-                🎮 Open Pre-Synced Game Tab
-              </button>
-              <button id="copyHookBtn" class="predictor-mini-btn" style="border-color:#FFEA3D; color:#FFEA3D;" onclick="copyExternalSitePreClickHook()" title="Copy 1-Click Pre-Roll Sync Hook for external offline-dice.com tab">
-                ⚡ Pre-Click Hook (offline-dice.com)
+              <a href="/offline-dice.user.js" target="_blank" class="predictor-mini-btn" style="background:linear-gradient(135deg,#FFEA3D,#F59E0B); color:#000; border-color:#FFEA3D; font-weight:800; text-decoration:none;">
+                🚀 1-Click Auto-Install (offline-dice.com)
+              </a>
+              <a id="bookmarkletDragLink" href="#" class="predictor-mini-btn" style="border-color:#00D2FF; color:#00D2FF; font-weight:800; text-decoration:none;" onclick="event.preventDefault();alert('Drag this button onto your browser Bookmarks Bar (Ctrl+Shift+B)! Then whenever you open offline-dice.com, just click that bookmark once.');">
+                🔖 Drag to Bookmarks Bar
+              </a>
+              <button id="copyHookBtn" class="predictor-mini-btn" style="border-color:#FFEA3D; color:#FFEA3D;" onclick="copyExternalSitePreClickHook()" title="Copy Silent Pre-Roll Sync Hook for external offline-dice.com tab">
+                ⚡ Copy Silent Hook
               </button>
             </div>
 
@@ -3787,8 +3790,6 @@ body.blur-active header img[src="offlinetext.png"]:hover {
         <div style="text-align: center; color: white; font-family: 'Fredoka', sans-serif;">
           ID: <strong id="gameIdDisplay" style="font-size: 20px; letter-spacing: 2px;">LOADING...</strong> - <a href="./verify_html.html" target="_blank" style="color: #FFFFFF; text-decoration: underline; font-weight: 600;" data-i18n="verifyLink">Verify</a>
         </div>
-
-        <div id="gameNextRollPreviewBar" style="width: 100%; display: flex; justify-content: center;"></div>
 
         <button id="rollBtn" class="roll-btn" onclick="rollDice()">
           <span class="stretch-text" data-i18n="rollBtn">ROLL AGAIN !</span>
