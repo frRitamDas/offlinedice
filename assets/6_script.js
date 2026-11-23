@@ -17,64 +17,10 @@ if(syncChannel){
     if((msg.type==="CUSTOM_ROLL_LOCKED"||msg.type==="NEXT_ROLL_QUEUED")&&msg.nextRoll){
       window.__queuedNextRoll=msg.nextRoll;
       if(msg.nextRoll.rollId)window.__unconsumedRollId=msg.nextRoll.rollId;
-      window.renderGameNextRollPreview&&window.renderGameNextRollPreview(msg.nextRoll);
     }
   };
 }
-let gamePreviewHidden=false;
-window.toggleGameNextPreview=function(){
-  gamePreviewHidden=!gamePreviewHidden;
-  window.renderGameNextRollPreview&&window.renderGameNextRollPreview(window.__queuedNextRoll);
-};
-window.cycleGamePreviewDieColor=function(dieIdx){
-  if(!window.__queuedNextRoll||!Array.isArray(window.__queuedNextRoll.names))return;
-  const names=[...window.__queuedNextRoll.names];
-  const curName=names[dieIdx]||"Red";
-  const curIdx=u.findIndex(c=>c.name===curName);
-  const nextCol=u[(curIdx+1)%u.length];
-  names[dieIdx]=nextCol.name;
-  window.queueNextRollInFirebase(m+1,names.length,names,true);
-};
-window.rerigGameNextRoll=function(){
-  const dcEl=document.getElementById("diceCount");
-  const dc=dcEl?parseInt(dcEl.value,10)||4:4;
-  window.queueNextRollInFirebase(m+1,dc,null,true);
-};
-window.renderGameNextRollPreview=function(rollObj){
-  const bar=document.getElementById("gameNextRollPreviewBar");
-  if(!bar)return;
-  if(!rollObj||!Array.isArray(rollObj.dice)||rollObj.dice.length===0){
-    bar.innerHTML="";
-    return;
-  }
-  if(gamePreviewHidden){
-    bar.innerHTML=`<div style="display:inline-flex;align-items:center;gap:8px;background:rgba(15,15,24,0.85);border:1px solid rgba(255,255,255,0.18);padding:5px 12px;border-radius:999px;font-family:'Fredoka',sans-serif;font-size:12px;color:rgba(255,255,255,0.75);cursor:pointer;" onclick="toggleGameNextPreview()">👁️ Show Next Dice Rigged Preview (Roll #${rollObj.rollNumber||m+1})</div>`;
-    return;
-  }
-  const diceHtml=rollObj.dice.map((d,idx)=>`
-    <div onclick="cycleGamePreviewDieColor(${idx})" title="Click to rig/change Die #${idx+1} color" style="display:inline-flex;align-items:center;gap:6px;background:rgba(0,0,0,0.65);border:2px solid ${d.hex};padding:4px 10px;border-radius:10px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.4);">
-      <span style="width:16px;height:16px;border-radius:4px;background:${d.hex};display:inline-flex;align-items:center;justify-content:center;border:1px solid rgba(255,255,255,0.6);">
-        <span style="width:4px;height:4px;border-radius:50%;background:#fff;"></span>
-      </span>
-      <strong style="color:${d.hex};font-size:13px;letter-spacing:0.5px;">${d.name.toUpperCase()}</strong>
-    </div>
-  `).join("");
-  bar.innerHTML=`
-    <div style="background:linear-gradient(135deg,rgba(18,18,30,0.95),rgba(10,10,18,0.95));border:2px solid #FFEA3D;border-radius:14px;padding:10px 14px;box-shadow:0 6px 20px rgba(0,0,0,0.65),0 0 15px rgba(255,234,61,0.2);max-width:620px;width:95%;margin:2px auto;font-family:'Fredoka',sans-serif;">
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
-        <span style="font-size:12px;font-weight:800;color:#FFEA3D;letter-spacing:0.6px;">🔮 NEXT DICE TO COME (BEFORE YOU ROLL — 100% RIGGED):</span>
-        <div style="display:flex;gap:6px;align-items:center;">
-          <span style="font-size:10.5px;color:rgba(255,255,255,0.6);">Tap any die to change color</span>
-          <button type="button" onclick="rerigGameNextRoll()" style="background:#00D2FF;color:#000;border:none;border-radius:6px;padding:3px 8px;font-size:11px;font-weight:800;cursor:pointer;">🎲 Re-Rig</button>
-          <button type="button" onclick="toggleGameNextPreview()" style="background:rgba(255,255,255,0.12);color:#fff;border:1px solid rgba(255,255,255,0.25);border-radius:6px;padding:3px 7px;font-size:11px;font-weight:700;cursor:pointer;" title="Hide Preview Bar">👁️</button>
-        </div>
-      </div>
-      <div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:center;align-items:center;">
-        ${diceHtml}
-      </div>
-    </div>
-  `;
-};
+window.renderGameNextRollPreview=function(){};
 function attachGameNextRollListener(sessionId){
   if(!sessionId)return;
   if(nextRollRefListener){try{nextRollRefListener.ref.off("value",nextRollRefListener.cb)}catch(e){}nextRollRefListener=null}
