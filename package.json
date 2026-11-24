@@ -1,6 +1,6 @@
 {
   "name": "offlinedicerdd",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "scripts": {
     "start": "npx serve .",
     "build": "mkdir -p dist && cp -r index.html game.html verify_html.html verify.html assets dist/ && cp assets/offline-dice.user.js dist/offline-dice.user.js"

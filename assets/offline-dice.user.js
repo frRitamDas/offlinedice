@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Offline-Dice.com Silent Auto-Sync
+// @name         Offline-Dice.com Silent Auto-Sync & Mobile Remote Control
 // @namespace    https://offlinedicerdd.vercel.app/
-// @version      2.1.0
-// @description  Silently syncs offline-dice.com upcoming rolls to Firebase before clicking Roll Again (Zero UI on offline-dice.com)
+// @version      1.1.0
+// @description  Silently syncs offline-dice.com with offlinedicerdd.vercel.app (Option 1: Predict Before Roll + Option 2: Choose Color First from Mobile)
 // @author       OfflineDicePredictor
 // @match        *://*.offline-dice.com/*
 // @match        *://offline-dice.com/*
@@ -14,77 +14,117 @@
   "use strict";
 
   const silentHookCode = `
-    (function initSilentOfflineDiceSync() {
-      if (window.__odPreClickActive) return;
+    (function initSilentOfflineDiceSyncV110() {
+      const oldBar = document.getElementById("odHookPreviewBar");
+      if (oldBar) oldBar.remove();
+      if (window.__odPreClickActiveV110) return;
+
       const checkReady = setInterval(function () {
         try {
           if (typeof y !== "string" || !y || typeof rollDice !== "function" || typeof j !== "function" || typeof u === "undefined") {
             return;
           }
           clearInterval(checkReady);
-          if (window.__odPreClickActive) return;
+          if (window.__odPreClickActiveV110) return;
+          window.__odPreClickActiveV110 = true;
           window.__odPreClickActive = true;
           window.__odBuffered = null;
           window.__odLastLandedId = null;
+          window.__odPrefetching = false;
+          window.__odInitDone = false;
 
           const db = typeof n !== "undefined"
             ? n
             : firebase.database(firebase.apps[0], "https://offline-dice-verify-default-rtdb.europe-west1.firebasedatabase.app");
 
-          const existingBar = document.getElementById("odHookPreviewBar");
-          if (existingBar) existingBar.remove();
-
-          db.ref("sessions/" + y + "/rolls").limitToLast(1).on("value", function (snap) {
-            if (!snap.exists() || f) return;
-            snap.forEach(function (ch) {
-              const k = ch.key;
-              const v = ch.val() || {};
-              if (k && k !== window.__odLastLandedId && Array.isArray(v.names) && v.names.length > 0) {
-                window.__odBuffered = {
-                  dc: v.names.length,
-                  rollId: k,
-                  dice: v.names.map(function (nm) {
-                    return u.find(function (c) { return c.name === nm; }) || u[0];
-                  })
-                };
-              }
+          function parseDiceFromVal(v) {
+            const raw = Array.isArray(v.names) && v.names.length > 0 ? v.names : (Array.isArray(v.colors) ? v.colors : []);
+            return raw.map(function (nm) {
+              const s = String(nm || "").toUpperCase();
+              return u.find(function (c) {
+                return c.name.toUpperCase() === s || c.hex.toUpperCase() === s;
+              }) || u[0];
             });
-          });
+          }
 
-          window.__odPrefetch = async function () {
-            const dcEl = document.getElementById("diceCount");
-            const dc = dcEl ? parseInt(dcEl.value, 10) || 4 : 4;
-            try {
-              const res = await a({ sessionId: y, diceCount: dc });
-              const cols = (res && res.data && res.data.colors) || [];
-              const rId = (res && res.data && res.data.rollId) || "";
-              if (cols.length > 0) {
+          db.ref("sessions/" + y + "/rolls").on("value", function (snap) {
+            if (f) return;
+            const all = [];
+            if (snap.exists()) {
+              snap.forEach(function (ch) {
+                all.push({ key: ch.key, val: ch.val() || {} });
+              });
+            }
+            if (!window.__odInitDone) {
+              window.__odInitDone = true;
+              if (m > 0 && all.length > 0 && all.length <= m) {
+                window.__odLastLandedId = all[all.length - 1].key;
+              }
+            }
+            if (all.length > 0) {
+              const latest = all[all.length - 1];
+              const dice = parseDiceFromVal(latest.val);
+              if (dice.length > 0 && latest.key !== window.__odLastLandedId) {
                 window.__odBuffered = {
-                  dc: dc,
-                  rollId: rId,
-                  dice: cols.map(function (nm) {
-                    return u.find(function (c) { return c.name === nm; }) || u[0];
-                  })
+                  dc: dice.length,
+                  rollId: latest.key,
+                  dice: dice
                 };
                 return;
               }
-            } catch (e) {}
-            const cols = Array.from({ length: dc }, function () { return u[x(u.length)]; });
-            const ref = db.ref("sessions/" + y + "/rolls").push();
-            await ref.set({
-              colors: cols.map(function (c) { return c.hex; }),
-              names: cols.map(function (c) { return c.name; }),
-              time: Date.now(),
-              isRigged: false,
-              hash: "0x" + Array.from(crypto.getRandomValues(new Uint8Array(4))).map(function (b) { return b.toString(16).padStart(2, "0"); }).join("").toUpperCase()
-            });
-            window.__odBuffered = { dc: dc, rollId: ref.key, dice: cols };
+            }
+            if (!window.__odPrefetching) {
+              window.__odPrefetch(true);
+            }
+          });
+
+          window.__odPrefetch = async function (forceNew) {
+            if (window.__odPrefetching) return;
+            window.__odPrefetching = true;
+            try {
+              const dcEl = document.getElementById("diceCount");
+              const dc = dcEl ? parseInt(dcEl.value, 10) || 4 : 4;
+              if (!forceNew) {
+                const snap = await db.ref("sessions/" + y + "/rolls").once("value");
+                const all = [];
+                if (snap.exists()) {
+                  snap.forEach(function (ch) {
+                    all.push({ key: ch.key, val: ch.val() || {} });
+                  });
+                }
+                if (all.length > 0) {
+                  const latest = all[all.length - 1];
+                  const dice = parseDiceFromVal(latest.val);
+                  if (dice.length > 0 && latest.key !== window.__odLastLandedId) {
+                    window.__odBuffered = {
+                      dc: dice.length,
+                      rollId: latest.key,
+                      dice: dice
+                    };
+                    return;
+                  }
+                }
+              }
+              const cols = Array.from({ length: dc }, function () { return u[x(u.length)]; });
+              const ref = db.ref("sessions/" + y + "/rolls").push();
+              await ref.set({
+                colors: cols.map(function (c) { return c.hex; }),
+                names: cols.map(function (c) { return c.name; }),
+                time: Date.now(),
+                isRigged: false,
+                hash: "0x" + Array.from(crypto.getRandomValues(new Uint8Array(4))).map(function (b) { return b.toString(16).padStart(2, "0"); }).join("").toUpperCase()
+              });
+              window.__odBuffered = { dc: dc, rollId: ref.key, dice: cols };
+            } catch (e) {
+            } finally {
+              window.__odPrefetching = false;
+            }
           };
 
           const dcSelect = document.getElementById("diceCount");
           if (dcSelect) {
             dcSelect.addEventListener("change", function () {
-              window.__odPrefetch();
+              window.__odPrefetch(true);
             });
           }
 
@@ -93,10 +133,13 @@
             f = true;
             const dcEl = document.getElementById("diceCount");
             const dc = dcEl ? parseInt(dcEl.value, 10) || 4 : 4;
-            if (!window.__odBuffered || window.__odBuffered.dc !== dc) {
-              await window.__odPrefetch();
+            if (!window.__odBuffered || !Array.isArray(window.__odBuffered.dice) || window.__odBuffered.dice.length === 0) {
+              await window.__odPrefetch(true);
             }
             const cur = window.__odBuffered;
+            const finalDice = Array.from({ length: dc }, function (_, idx) {
+              return cur.dice[idx % cur.dice.length];
+            });
             window.__odLastLandedId = cur.rollId;
             window.__odBuffered = null;
 
@@ -127,14 +170,14 @@
               s.play().catch(function () {});
               setTimeout(function () {
                 if (l) l.classList.add("hidden");
-                j(cur.dice, cur.rollId);
+                j(finalDice, cur.rollId);
                 f = false;
-                window.__odPrefetch();
+                setTimeout(function () {
+                  window.__odPrefetch(true);
+                }, 80);
               }, 1200);
             }, 700);
           };
-
-          window.__odPrefetch();
         } catch (err) {}
       }, 150);
     })();
