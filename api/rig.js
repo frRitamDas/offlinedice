@@ -1,5 +1,5 @@
 const SUPABASE_URL = "https://iejditssxoknjpkfahxs.supabase.co";
-const SUPABASE_KEY =
+const SUPABASE_ANON_KEY =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImllamRpdHNzeG9rbmpwa2ZhaHhzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTUxODc1MTEsImV4cCI6MjExMDc2MzUxMX0.Jt9XACLGe18RE1qb4HLMAog9Rwfv-NOAeNoJ2Amz3NI";
 
 const DICE_PALETTE = [
@@ -21,17 +21,17 @@ function normalizeId(raw) {
 
 function mapNamesToColors(names) {
   return (names || []).map((nm) => {
-    const s = String(nm || "").toUpperCase();
-    const found =
+    const s = String(nm || "").trim().toUpperCase();
+    return (
       DICE_PALETTE.find(
         (c) => c.name.toUpperCase() === s || c.hex.toUpperCase() === s
-      ) || DICE_PALETTE[0];
-    return found;
+      ) || DICE_PALETTE[0]
+    );
   });
 }
 
 function generateRandomDice(count) {
-  const dc = Math.min(100, Math.max(1, parseInt(count, 10) || 4));
+  const dc = Math.min(100, Math.max(1, Number(count) || 4));
   const list = [];
   for (let i = 0; i < dc; i++) {
     const idx = Math.floor(Math.random() * DICE_PALETTE.length);
@@ -50,8 +50,8 @@ async function getSessionRow(sessionId) {
   const resp = await fetch(url, {
     method: "GET",
     headers: {
-      apikey: SUPABASE_KEY,
-      Authorization: `Bearer ${SUPABASE_KEY}`,
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
       "Content-Type": "application/json"
     }
   });
@@ -65,8 +65,8 @@ async function upsertSessionRow(payload) {
   const resp = await fetch(url, {
     method: "POST",
     headers: {
-      apikey: SUPABASE_KEY,
-      Authorization: `Bearer ${SUPABASE_KEY}`,
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
       "Content-Type": "application/json",
       Prefer: "resolution=merge-duplicates,return=representation"
     },
@@ -77,13 +77,10 @@ async function upsertSessionRow(payload) {
   return Array.isArray(rows) && rows.length > 0 ? rows[0] : payload;
 }
 
-module.exports = async function handler(req, res) {
+export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader(
-    "Access-Control-Allow-Headers",
-    "Content-Type, Authorization, apikey"
-  );
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, apikey");
   res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
 
   if (req.method === "OPTIONS") {
@@ -91,45 +88,83 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    const body =
-      req.method === "POST"
-        ? typeof req.body === "string"
-          ? JSON.parse(req.body || "{}")
-          : req.body || {}
-        : {};
+    let body = req.body || {};
+    if (typeof body === "string") {
+      try {
+        body = JSON.parse(body);
+      } catch (_e) {
+        body = {};
+      }
+    }
+
+    const action =
+      req.query?.action ||
+      body.action ||
+      (req.query?.consume === "1" ? "consume" : "status");
+
+    if (action === "latest_pc") {
+      const latestPointer = await getSessionRow("__LATEST_PC__");
+      const latestId =
+        latestPointer &&
+        Array.isArray(latestPointer.predicted_names) &&
+        latestPointer.predicted_names[0]
+          ? latestPointer.predicted_names[0]
+          : "";
+      let sessionData = null;
+      if (latestId) {
+        sessionData = await getSessionRow(latestId);
+      }
+      return res.status(200).json({
+        ok: true,
+        latestPcSessionId: latestId,
+        updatedAt: latestPointer ? latestPointer.updated_at : 0,
+        session: sessionData
+      });
+    }
 
     const rawId =
-      (req.query && (req.query.sessionId || req.query.id)) ||
-      body.sessionId ||
-      body.id ||
-      "";
+      req.query?.sessionId || req.query?.id || body.sessionId || body.id || "";
     const sessionId = normalizeId(rawId);
 
     if (!sessionId) {
-      return res.status(400).json({ ok: false, error: "Missing sessionId" });
+      return res.status(400).json({
+        ok: false,
+        error: "Missing sessionId"
+      });
+    }
+
+    const source = req.query?.source || body.source || "";
+    if (source === "pc" && sessionId !== "__LATEST_PC__") {
+      upsertSessionRow({
+        session_id: "__LATEST_PC__",
+        locked_names: [],
+        locked_colors: [],
+        predicted_names: [sessionId],
+        predicted_colors: [],
+        is_locked: false,
+        persist_every_roll: false,
+        roll_number: 1,
+        updated_at: Date.now()
+      }).catch(() => {});
     }
 
     const diceCount = Math.min(
       100,
       Math.max(
         1,
-        parseInt(
-          (req.query && req.query.diceCount) || body.diceCount || 4,
-          10
-        ) || 4
+        parseInt(req.query?.diceCount || body.diceCount || 4, 10) || 4
       )
     );
 
-    const action =
-      (req.query && req.query.action) ||
-      body.action ||
-      (req.query && req.query.consume === "1" ? "consume" : "status");
-
     let existing = await getSessionRow(sessionId);
 
-    // 1. LOCK ACTION (Option 2: Choose My Color First from Mobile/Web)
     if (action === "lock") {
-      const inputNames = Array.isArray(body.lockedNames)
+      const queryColors = req.query?.colors
+        ? String(req.query.colors).split(",")
+        : null;
+      const inputNames = queryColors
+        ? queryColors
+        : Array.isArray(body.lockedNames)
         ? body.lockedNames
         : Array.isArray(body.names)
         ? body.names
@@ -137,8 +172,11 @@ module.exports = async function handler(req, res) {
       const mapped = mapNamesToColors(inputNames);
       const names = mapped.map((c) => c.name);
       const colors = mapped.map((c) => c.hex);
+      const persistParam = req.query?.persist;
       const persist =
-        body.persistEveryRoll !== undefined
+        persistParam !== undefined
+          ? persistParam === "1" || persistParam === "true"
+          : body.persistEveryRoll !== undefined
           ? Boolean(body.persistEveryRoll)
           : existing
           ? Boolean(existing.persist_every_roll)
@@ -166,9 +204,13 @@ module.exports = async function handler(req, res) {
       });
     }
 
-    // 2. REROLL / PREDICT ACTION (Option 1: Generate fresh random pre-click prediction)
     if (action === "reroll" || action === "predict") {
-      const customNames = Array.isArray(body.predictedNames)
+      const queryColors = req.query?.colors
+        ? String(req.query.colors).split(",")
+        : null;
+      const customNames = queryColors
+        ? queryColors
+        : Array.isArray(body.predictedNames)
         ? body.predictedNames
         : null;
       const gen = customNames
@@ -200,7 +242,6 @@ module.exports = async function handler(req, res) {
       });
     }
 
-    // 3. CONSUME ACTION (Called by offline-dice.com when user clicks "ROLL AGAIN !")
     if (action === "consume") {
       if (!existing) {
         const firstGen = generateRandomDice(diceCount);
@@ -266,11 +307,10 @@ module.exports = async function handler(req, res) {
       });
     }
 
-    // 4. DEFAULT STATUS ACTION (Polled by Mobile Predictor & PC Bookmark before click)
     if (
       !existing ||
-      (!Array.isArray(existing.predicted_names) ||
-        existing.predicted_names.length === 0)
+      !Array.isArray(existing.predicted_names) ||
+      existing.predicted_names.length === 0
     ) {
       const initGen = generateRandomDice(diceCount);
       existing = await upsertSessionRow({
@@ -308,7 +348,7 @@ module.exports = async function handler(req, res) {
   } catch (err) {
     return res.status(500).json({
       ok: false,
-      error: String((err && err.message) || err)
+      error: String(err?.message || err)
     });
   }
-};
+}
