@@ -3425,13 +3425,16 @@ body.blur-active header img[src="offlinetext.png"]:hover {
       <div class="predictor-panel">
         <div class="predictor-header-banner">
           <div>
-            <h1 class="predictor-main-title">OFFLINE DICE ID PREDICTOR</h1>
-            <div style="font-size: 13px; color: rgba(255,255,255,0.72); font-weight: 600; margin-top: 4px;">
-              Enter any Offline Dice Session ID to predict the exact upcoming dice colors &amp; order before they roll.
+            <div style="display:inline-flex; align-items:center; gap:8px; margin-bottom:4px;">
+              <h1 class="predictor-main-title">OFFLINE DICE PREDICTOR &amp; CONTROLLER</h1>
+              <span style="background:linear-gradient(135deg,#FFEA3D,#F59E0B); color:#000; font-family:'Fredoka',sans-serif; font-size:11px; font-weight:900; padding:2px 8px; border-radius:999px; letter-spacing:0.6px;">v1.1.0</span>
+            </div>
+            <div style="font-size: 13px; color: rgba(255,255,255,0.75); font-weight: 600; margin-top: 2px;">
+              Option 1: Know all 4 colors before you click Roll Again • Option 2: Choose your colors on Mobile first, then roll on PC!
             </div>
           </div>
           <div id="predConnectionBadge" class="predictor-status-pill">
-            <span class="predictor-status-dot"></span> FIREBASE LIVE + ID ENGINE SYNCED
+            <span class="predictor-status-dot"></span> v1.1.0 • PC ↔ MOBILE FIREBASE LIVE
           </div>
         </div>
 
@@ -3455,7 +3458,7 @@ body.blur-active header img[src="offlinetext.png"]:hover {
             </select>
 
             <button id="predictActionBtn" class="predictor-btn-primary" onclick="applyPredictorGameId()">
-              🔮 PREDICT NEXT DICE !
+              ⚡ CONNECT ID
             </button>
           </div>
 
@@ -3473,14 +3476,14 @@ body.blur-active header img[src="offlinetext.png"]:hover {
               <button class="predictor-mini-btn" onclick="syncGameToPredictorId()" title="Force the embedded Offline Dice Game to use this exact ID">
                 🔄 Apply ID to Game
               </button>
-              <a href="/offline-dice.user.js" target="_blank" class="predictor-mini-btn" style="background:linear-gradient(135deg,#FFEA3D,#F59E0B); color:#000; border-color:#FFEA3D; font-weight:800; text-decoration:none;">
-                🚀 1-Click Auto-Install (offline-dice.com)
+              <a id="bookmarkletDragLink" href="#" class="predictor-mini-btn" style="background:linear-gradient(135deg,#00D2FF,#2563EB); color:#fff; border-color:#00D2FF; font-weight:800; text-decoration:none;" onclick="event.preventDefault();alert('On your PC browser: Press Ctrl+Shift+B to show your Bookmarks Bar, then DRAG this blue button onto your Bookmarks Bar! Whenever you open offline-dice.com on PC, just click that bookmark once.');">
+                🔖 Drag to PC Bookmarks Bar (v1.1.0)
               </a>
-              <a id="bookmarkletDragLink" href="#" class="predictor-mini-btn" style="border-color:#00D2FF; color:#00D2FF; font-weight:800; text-decoration:none;" onclick="event.preventDefault();alert('Drag this button onto your browser Bookmarks Bar (Ctrl+Shift+B)! Then whenever you open offline-dice.com, just click that bookmark once.');">
-                🔖 Drag to Bookmarks Bar
+              <a href="/offline-dice.user.js" target="_blank" class="predictor-mini-btn" style="border-color:#FFEA3D; color:#FFEA3D; font-weight:800; text-decoration:none;">
+                🚀 Auto-Install (.user.js)
               </a>
-              <button id="copyHookBtn" class="predictor-mini-btn" style="border-color:#FFEA3D; color:#FFEA3D;" onclick="copyExternalSitePreClickHook()" title="Copy Silent Pre-Roll Sync Hook for external offline-dice.com tab">
-                ⚡ Copy Silent Hook
+              <button id="copyHookBtn" class="predictor-mini-btn" style="border-color:rgba(255,255,255,0.3); color:#fff;" onclick="copyExternalSitePreClickHook()" title="Copy Silent Pre-Roll Sync Hook for external offline-dice.com tab">
+                📋 Copy Bookmark Code
               </button>
             </div>
 
@@ -3493,6 +3496,91 @@ body.blur-active header img[src="offlinetext.png"]:hover {
               <button class="predictor-mini-btn" onclick="document.getElementById('predictorDiceCountSelect').value='6';handlePredictorDiceCountChange('6')">6</button>
               <button class="predictor-mini-btn" onclick="document.getElementById('predictorDiceCountSelect').value='12';handlePredictorDiceCountChange('12')">12</button>
             </div>
+          </div>
+        </div>
+
+        <!-- v1.1.0 TWO-OPTION MODE SWITCHER -->
+        <div class="v110-option-switcher">
+          <button type="button" id="v110TabOpt1" class="v110-option-tab active-opt1" onclick="switchV110Option(1)">
+            <div class="v110-opt-title">
+              <span>🔮 OPTION 1: PREDICT DICE BEFORE ROLL</span>
+            </div>
+            <div class="v110-opt-desc">
+              See all 4 upcoming colors on your phone BEFORE you click "ROLL AGAIN !" on PC.
+            </div>
+          </button>
+
+          <button type="button" id="v110TabOpt2" class="v110-option-tab" onclick="switchV110Option(2)">
+            <div class="v110-opt-title">
+              <span>🎨 OPTION 2: CHOOSE MY COLOR FIRST</span>
+            </div>
+            <div class="v110-opt-desc">
+              Pick exact colors (e.g. Red • Red • Red • Red) on mobile first, then roll on PC to get that color!
+            </div>
+          </button>
+        </div>
+
+        <!-- v1.1.0 OPTION 2: MOBILE REMOTE COLOR CONTROLLER -->
+        <div id="v110Option2Controller" class="v110-remote-card" style="display: none;">
+          <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-bottom:8px;">
+            <div>
+              <div style="font-family:'Fredoka',sans-serif; font-size:15px; font-weight:800; color:#FFEA3D; letter-spacing:0.5px;">
+                🎨 OPTION 2: CHOOSE COLOR FIRST (MOBILE REMOTE CONTROLLER)
+              </div>
+              <div style="font-size:12px; color:rgba(255,255,255,0.75); margin-top:2px;">
+                Tap any 1-Tap Preset or customize each die below — it locks into Firebase immediately so your next PC roll lands on your exact colors!
+              </div>
+            </div>
+            <div style="display:flex; gap:6px; align-items:center;">
+              <button type="button" id="v110LockModeSingle" class="predictor-mini-btn" style="background:#FFEA3D; color:#000; border-color:#FFEA3D; font-weight:800;" onclick="setV110PersistMode(false)">
+                1️⃣ Next Roll Only
+              </button>
+              <button type="button" id="v110LockModeRepeat" class="predictor-mini-btn" style="border-color:#A855F7; color:#D8B4FE; font-weight:800;" onclick="setV110PersistMode(true)">
+                ♾️ Every Roll (Auto-Lock)
+              </button>
+            </div>
+          </div>
+
+          <div id="v110LiveLockStatus" style="background:rgba(34,197,94,0.14); border:1.5px solid #22C55E; color:#4ADE80; font-family:'Fredoka',sans-serif; font-size:12.5px; font-weight:800; padding:8px 12px; border-radius:10px; text-align:center; margin-bottom:10px;">
+            🎯 Select your desired colors below — sends instantly to PC!
+          </div>
+
+          <div style="font-size:11.5px; font-weight:800; color:rgba(255,255,255,0.7); letter-spacing:0.6px; text-transform:uppercase;">
+            ⚡ 1-TAP INSTANT SAME COLOR (SENDS IMMEDIATELY TO PC):
+          </div>
+          <div class="v110-preset-grid">
+            <button type="button" class="v110-preset-btn" style="background:linear-gradient(135deg,#DC2626,#991B1B); border-color:#FF4D4D;" onclick="instantForceSameColor('Red')">
+              🔴 ALL RED (4x)
+            </button>
+            <button type="button" class="v110-preset-btn" style="background:linear-gradient(135deg,#EA580C,#9A3412); border-color:#FFA500;" onclick="instantForceSameColor('Orange')">
+              🟠 ALL ORANGE (4x)
+            </button>
+            <button type="button" class="v110-preset-btn" style="background:linear-gradient(135deg,#CA8A04,#854D0E); border-color:#FFD700;" onclick="instantForceSameColor('Yellow')">
+              🟡 ALL YELLOW (4x)
+            </button>
+            <button type="button" class="v110-preset-btn" style="background:linear-gradient(135deg,#16A34A,#14532D); border-color:#4ADE80;" onclick="instantForceSameColor('Green')">
+              🟢 ALL GREEN (4x)
+            </button>
+            <button type="button" class="v110-preset-btn" style="background:linear-gradient(135deg,#2563EB,#1E3A8A); border-color:#60A5FA;" onclick="instantForceSameColor('Blue')">
+              🔵 ALL BLUE (4x)
+            </button>
+            <button type="button" class="v110-preset-btn" style="background:linear-gradient(135deg,#7E22CE,#4C1D95); border-color:#C084FC;" onclick="instantForceSameColor('Purple')">
+              🟣 ALL PURPLE (4x)
+            </button>
+          </div>
+
+          <div style="font-size:11.5px; font-weight:800; color:rgba(255,255,255,0.7); letter-spacing:0.6px; text-transform:uppercase; margin-top:6px;">
+            🎲 CUSTOM COLOR PER DIE (TAP R / O / Y / G / B / P FOR EACH DIE):
+          </div>
+          <div id="v110CustomDiePickerGrid" class="v110-die-picker-grid"></div>
+
+          <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;">
+            <button type="button" class="predictor-btn-primary" style="flex:1; background:linear-gradient(135deg,#22C55E,#16A34A); color:#000; border-color:#4ADE80; font-size:14px; padding:12px;" onclick="lockCustomNextRoll()">
+              🔒 LOCK &amp; SEND THESE COLORS TO PC NOW !
+            </button>
+            <button type="button" class="predictor-mini-btn" style="padding:10px 14px;" onclick="switchV110Option(1)">
+              🔮 View Option 1 (Predict)
+            </button>
           </div>
         </div>
 

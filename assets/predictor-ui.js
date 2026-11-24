@@ -18,6 +18,10 @@
   let customDraftColors = [];
   let selectedHistoryRoll = null; // If user clicks a specific past roll to inspect
   let prefetchInFlightForId = "";
+  let v110ActiveOption = 1; // 1 = Predict Next Dice Before Roll, 2 = Choose Color First
+  let v110PersistEveryRoll = false; // false = Next Roll Only, true = Auto-Lock Every Roll
+  let v110LockedColors = []; // Active locked colors from Option 2
+  let autoRelockInFlight = false;
 
   function getDb() {
     if (window.firebaseDbInstance) return window.firebaseDbInstance;
@@ -31,6 +35,7 @@
     } catch (e) {}
     return null;
   }
+  const getFirebaseDb = getDb;
 
   function getRollDiceCallable() {
     if (window.rollDiceSecureCallable) return window.rollDiceSecureCallable;
@@ -129,11 +134,26 @@
         const latest = rolls[rolls.length - 1];
         selectedHistoryRoll = null;
         isCurrentlyRollingOnScreen = false;
-        triggerInterceptBanner(
-          `🔮 NEXT DICE READY BEFORE YOU CLICK (ROLL #${rolls.length}): ${latest.names.join(" • ").toUpperCase()} — 100% ACCURATE!`
-        );
-        if (soundAlertEnabled) {
-          Predictor.playAlertPing("intercept");
+
+        if (v110PersistEveryRoll && v110LockedColors.length > 0 && !autoRelockInFlight) {
+          const matchesLocked =
+            latest.names &&
+            latest.names.length === v110LockedColors.length &&
+            latest.names.every((n, idx) => n.toUpperCase() === v110LockedColors[idx].toUpperCase());
+          if (!matchesLocked) {
+            autoRelockInFlight = true;
+            customDraftColors = [...v110LockedColors];
+            window.lockCustomNextRoll().finally(() => {
+              autoRelockInFlight = false;
+            });
+          }
+        } else {
+          triggerInterceptBanner(
+            `🔮 NEXT DICE READY BEFORE YOU CLICK (ROLL #${rolls.length}): ${latest.names.join(" • ").toUpperCase()} — 100% ACCURATE!`
+          );
+          if (soundAlertEnabled) {
+            Predictor.playAlertPing("intercept");
+          }
         }
       }
 
@@ -429,8 +449,6 @@
   }
 
   function renderCustomLockerSlots(activeRoll) {
-    const container = document.getElementById("lockerDiceSlots");
-    if (!container) return;
     const slotCount = Math.min(12, currentDiceCount);
     if (customDraftColors.length !== slotCount) {
       if (activeRoll && activeRoll.dice && activeRoll.dice.length > 0) {
@@ -446,27 +464,61 @@
     const rollNumSpan = document.getElementById("lockerTargetRollLabel");
     if (rollNumSpan) rollNumSpan.textContent = `Next Roll #${Math.max(1, loggedRollsCount)}`;
 
-    container.innerHTML = "";
-    customDraftColors.forEach((colName, idx) => {
-      const c = Predictor.COLOR_BY_NAME[colName.toUpperCase()] || Predictor.DICE_COLORS[0];
-      const slot = document.createElement("div");
-      slot.className = "locker-die-slot";
-      slot.title = "Click to cycle die color";
-      slot.onclick = () => {
-        const curIdx = Predictor.DICE_COLORS.findIndex((x) => x.name === c.name);
-        const nextColor = Predictor.DICE_COLORS[(curIdx + 1) % Predictor.DICE_COLORS.length];
-        customDraftColors[idx] = nextColor.name;
-        renderCustomLockerSlots(activeRoll);
-      };
-      slot.innerHTML = `
-        <span style="font-size:10px;color:rgba(255,255,255,0.65);font-weight:800;">#${idx + 1}</span>
-        <div class="upcoming-die-box" style="width:34px;height:34px;border-radius:8px;background-color:${c.hex};">
-          <div class="upcoming-die-dot" style="width:8px;height:8px;"></div>
-        </div>
-        <span style="font-size:11px;font-weight:800;color:${c.hex};">${c.name}</span>
-      `;
-      container.appendChild(slot);
-    });
+    const container = document.getElementById("lockerDiceSlots");
+    if (container) {
+      container.innerHTML = "";
+      customDraftColors.forEach((colName, idx) => {
+        const c = Predictor.COLOR_BY_NAME[colName.toUpperCase()] || Predictor.DICE_COLORS[0];
+        const slot = document.createElement("div");
+        slot.className = "locker-die-slot";
+        slot.title = "Click to cycle die color";
+        slot.onclick = () => {
+          const curIdx = Predictor.DICE_COLORS.findIndex((x) => x.name === c.name);
+          const nextColor = Predictor.DICE_COLORS[(curIdx + 1) % Predictor.DICE_COLORS.length];
+          customDraftColors[idx] = nextColor.name;
+          renderCustomLockerSlots(activeRoll);
+        };
+        slot.innerHTML = `
+          <span style="font-size:10px;color:rgba(255,255,255,0.65);font-weight:800;">#${idx + 1}</span>
+          <div class="upcoming-die-box" style="width:34px;height:34px;border-radius:8px;background-color:${c.hex};">
+            <div class="upcoming-die-dot" style="width:8px;height:8px;"></div>
+          </div>
+          <span style="font-size:11px;font-weight:800;color:${c.hex};">${c.name}</span>
+        `;
+        container.appendChild(slot);
+      });
+    }
+
+    // Render v1.1.0 Option 2 Custom Per-Die Picker Grid
+    const v110Grid = document.getElementById("v110CustomDiePickerGrid");
+    if (v110Grid) {
+      v110Grid.innerHTML = "";
+      customDraftColors.forEach((colName, idx) => {
+        const c = Predictor.COLOR_BY_NAME[colName.toUpperCase()] || Predictor.DICE_COLORS[0];
+        const card = document.createElement("div");
+        card.className = "v110-die-picker-card";
+        card.style.borderColor = c.hex;
+
+        const swatchesHtml = Predictor.DICE_COLORS.map((sc) => {
+          const isAct = sc.name.toUpperCase() === c.name.toUpperCase() ? "active" : "";
+          return `<button type="button" class="v110-swatch-btn ${isAct}" style="background:${sc.hex};" onclick="setV110SingleDieColor(${idx}, '${sc.name}')" title="Set Die #${idx + 1} to ${sc.name}">${sc.name.charAt(0)}</button>`;
+        }).join("");
+
+        card.innerHTML = `
+          <div style="display:flex; align-items:center; justify-content:space-between; width:100%;">
+            <span style="font-size:11px; font-weight:800; color:rgba(255,255,255,0.75);">DIE #${idx + 1}</span>
+            <strong style="font-family:'Fredoka',sans-serif; font-size:12.5px; color:${c.hex};">${c.name.toUpperCase()}</strong>
+          </div>
+          <div style="width:46px; height:46px; border-radius:11px; background:${c.hex}; border:2.5px solid #fff; display:flex; align-items:center; justify-content:center; box-shadow:0 4px 12px rgba(0,0,0,0.5);">
+            <div style="width:11px; height:11px; border-radius:50%; background:#fff;"></div>
+          </div>
+          <div class="v110-color-swatches">
+            ${swatchesHtml}
+          </div>
+        `;
+        v110Grid.appendChild(card);
+      });
+    }
   }
 
   function renderSessionHistoryFeed(cleanId) {
@@ -601,7 +653,7 @@
   };
 
   function getSilentHookCode() {
-    return `(function(){const oldBar=document.getElementById("odHookPreviewBar");if(oldBar)oldBar.remove();if(window.__odPreClickActive)return;window.__odPreClickActive=true;window.__odBuffered=null;window.__odLastLandedId=null;const db=typeof n!=="undefined"?n:firebase.database(firebase.apps[0],"https://offline-dice-verify-default-rtdb.europe-west1.firebasedatabase.app");db.ref("sessions/"+y+"/rolls").limitToLast(1).on("value",snap=>{if(!snap.exists()||f)return;snap.forEach(ch=>{const k=ch.key,v=ch.val()||{};if(k&&k!==window.__odLastLandedId&&Array.isArray(v.names)&&v.names.length>0){window.__odBuffered={dc:v.names.length,rollId:k,dice:v.names.map(nm=>u.find(c=>c.name===nm)||u[0])};}});});window.__odPrefetch=async function(){const dc=parseInt(document.getElementById("diceCount")?.value,10)||4;try{const res=await a({sessionId:y,diceCount:dc});const cols=res?.data?.colors||[],rId=res?.data?.rollId||"";if(cols.length>0){window.__odBuffered={dc,rollId:rId,dice:cols.map(nm=>u.find(c=>c.name===nm)||u[0])};return;}}catch(e){}const cols=Array.from({length:dc},()=>u[x(u.length)]);const ref=db.ref("sessions/"+y+"/rolls").push();await ref.set({colors:cols.map(c=>c.hex),names:cols.map(c=>c.name),time:Date.now(),isRigged:!1,hash:"0x"+Array.from(crypto.getRandomValues(new Uint8Array(4))).map(b=>b.toString(16).padStart(2,"0")).join("").toUpperCase()});window.__odBuffered={dc,rollId:ref.key,dice:cols};};document.getElementById("diceCount")?.addEventListener("change",()=>window.__odPrefetch());window.rollDice=async function(){if(f)return;f=true;const dc=parseInt(document.getElementById("diceCount")?.value,10)||4;if(!window.__odBuffered||window.__odBuffered.dc!==dc){await window.__odPrefetch();}const cur=window.__odBuffered;window.__odLastLandedId=cur.rollId;window.__odBuffered=null;const l=document.getElementById("rollOverlay"),i=document.getElementById("overlayTitle"),c=document.getElementById("overlayDiceContainer"),d=["You're Cooked...","Good Luck :)","Amazing!","Let's See...","Offline Dice On TOP!","Rolling..."];if(i)i.innerText=d[x(d.length)];if(c){c.innerHTML="";for(let k=0;k<dc;k++){const die=document.createElement("div");die.className="big-die";const dot=document.createElement("div");dot.className="big-die-dot";die.appendChild(dot);c.appendChild(die);}}setTimeout(()=>{c?.querySelectorAll(".big-die").forEach(el=>el.classList.add("initial-shake"));l?.classList.remove("hidden");s.currentTime=0;s.play().catch(()=>{});setTimeout(()=>{l?.classList.add("hidden");j(cur.dice,cur.rollId);f=false;window.__odPrefetch();},1200);},700);};window.__odPrefetch();})();`;
+    return `(function(){const oldBar=document.getElementById("odHookPreviewBar");if(oldBar)oldBar.remove();if(window.__odPreClickActiveV110)return;window.__odPreClickActiveV110=true;window.__odPreClickActive=true;window.__odBuffered=null;window.__odLastLandedId=null;window.__odPrefetching=false;window.__odInitDone=false;const db=typeof n!=="undefined"?n:firebase.database(firebase.apps[0],"https://offline-dice-verify-default-rtdb.europe-west1.firebasedatabase.app");function parseDice(v){const raw=Array.isArray(v.names)&&v.names.length>0?v.names:(Array.isArray(v.colors)?v.colors:[]);return raw.map(nm=>{const s=String(nm||"").toUpperCase();return u.find(c=>c.name.toUpperCase()===s||c.hex.toUpperCase()===s)||u[0];});}db.ref("sessions/"+y+"/rolls").on("value",snap=>{if(f)return;const all=[];if(snap.exists())snap.forEach(ch=>all.push({key:ch.key,val:ch.val()||{}}));if(!window.__odInitDone){window.__odInitDone=true;if(m>0&&all.length>0&&all.length<=m)window.__odLastLandedId=all[all.length-1].key;}if(all.length>0){const latest=all[all.length-1];const dice=parseDice(latest.val);if(dice.length>0&&latest.key!==window.__odLastLandedId){window.__odBuffered={dc:dice.length,rollId:latest.key,dice:dice};return;}}if(!window.__odPrefetching)window.__odPrefetch(true);});window.__odPrefetch=async function(forceNew){if(window.__odPrefetching)return;window.__odPrefetching=true;try{const dc=parseInt(document.getElementById("diceCount")?.value,10)||4;if(!forceNew){const snap=await db.ref("sessions/"+y+"/rolls").once("value");const all=[];if(snap.exists())snap.forEach(ch=>all.push({key:ch.key,val:ch.val()||{}}));if(all.length>0){const latest=all[all.length-1];const dice=parseDice(latest.val);if(dice.length>0&&latest.key!==window.__odLastLandedId){window.__odBuffered={dc:dice.length,rollId:latest.key,dice:dice};return;}}}const cols=Array.from({length:dc},()=>u[x(u.length)]);const ref=db.ref("sessions/"+y+"/rolls").push();await ref.set({colors:cols.map(c=>c.hex),names:cols.map(c=>c.name),time:Date.now(),isRigged:!1,hash:"0x"+Array.from(crypto.getRandomValues(new Uint8Array(4))).map(b=>b.toString(16).padStart(2,"0")).join("").toUpperCase()});window.__odBuffered={dc,rollId:ref.key,dice:cols};}catch(e){}finally{window.__odPrefetching=false;}};document.getElementById("diceCount")?.addEventListener("change",()=>window.__odPrefetch(true));window.rollDice=async function(){if(f)return;f=true;const dc=parseInt(document.getElementById("diceCount")?.value,10)||4;if(!window.__odBuffered||!Array.isArray(window.__odBuffered.dice)||window.__odBuffered.dice.length===0){await window.__odPrefetch(true);}const cur=window.__odBuffered;const finalDice=Array.from({length:dc},(_,idx)=>cur.dice[idx%cur.dice.length]);window.__odLastLandedId=cur.rollId;window.__odBuffered=null;const l=document.getElementById("rollOverlay"),i=document.getElementById("overlayTitle"),c=document.getElementById("overlayDiceContainer"),d=["You're Cooked...","Good Luck :)","Amazing!","Let's See...","Offline Dice On TOP!","Rolling..."];if(i)i.innerText=d[x(d.length)];if(c){c.innerHTML="";for(let k=0;k<dc;k++){const die=document.createElement("div");die.className="big-die";const dot=document.createElement("div");dot.className="big-die-dot";die.appendChild(dot);c.appendChild(die);}}setTimeout(()=>{c?.querySelectorAll(".big-die").forEach(el=>el.classList.add("initial-shake"));l?.classList.remove("hidden");s.currentTime=0;s.play().catch(()=>{});setTimeout(()=>{l?.classList.add("hidden");j(finalDice,cur.rollId);f=false;setTimeout(()=>window.__odPrefetch(true),80);},1200);},700);};})();`;
   }
 
   window.copyExternalSitePreClickHook = function () {
@@ -610,14 +662,64 @@
     const btn = document.getElementById("copyHookBtn");
     if (btn) {
       const old = btn.innerText;
-      btn.innerText = "✅ SILENT HOOK COPIED!";
+      btn.innerText = "✅ v1.1.0 CODE COPIED!";
       setTimeout(() => {
         btn.innerText = old;
       }, 2200);
     }
     triggerInterceptBanner(
-      `✅ SILENT HOOK COPIED! Zero UI on offline-dice.com — all 4 colors show only here on Predictor!`
+      `✅ v1.1.0 SILENT HOOK COPIED! Supports Option 1 (Predict Before Roll) + Option 2 (Choose Color First from Mobile)!`
     );
+  };
+
+  window.switchV110Option = function (opt) {
+    v110ActiveOption = opt === 2 ? 2 : 1;
+    const tab1 = document.getElementById("v110TabOpt1");
+    const tab2 = document.getElementById("v110TabOpt2");
+    const ctrl2 = document.getElementById("v110Option2Controller");
+    if (tab1) tab1.classList.toggle("active-opt1", v110ActiveOption === 1);
+    if (tab2) tab2.classList.toggle("active-opt2", v110ActiveOption === 2);
+    if (ctrl2) {
+      ctrl2.style.display = v110ActiveOption === 2 ? "block" : "none";
+    }
+    renderCustomLockerSlots(firebaseNextRoll);
+  };
+
+  window.setV110PersistMode = function (isRepeat) {
+    v110PersistEveryRoll = Boolean(isRepeat);
+    const btnSingle = document.getElementById("v110LockModeSingle");
+    const btnRepeat = document.getElementById("v110LockModeRepeat");
+    if (btnSingle) {
+      btnSingle.style.background = !v110PersistEveryRoll ? "#FFEA3D" : "rgba(255,255,255,0.08)";
+      btnSingle.style.color = !v110PersistEveryRoll ? "#000" : "#fff";
+    }
+    if (btnRepeat) {
+      btnRepeat.style.background = v110PersistEveryRoll ? "#A855F7" : "rgba(255,255,255,0.08)";
+      btnRepeat.style.color = v110PersistEveryRoll ? "#fff" : "#D8B4FE";
+    }
+    if (v110PersistEveryRoll && customDraftColors.length > 0) {
+      v110LockedColors = [...customDraftColors];
+      window.lockCustomNextRoll();
+    }
+  };
+
+  window.instantForceSameColor = function (colorName) {
+    const slotCount = Math.min(12, currentDiceCount);
+    customDraftColors = Array(slotCount).fill(colorName);
+    v110LockedColors = [...customDraftColors];
+    renderCustomLockerSlots(firebaseNextRoll);
+    window.lockCustomNextRoll();
+  };
+
+  window.setV110SingleDieColor = function (dieIdx, colorName) {
+    const slotCount = Math.min(12, currentDiceCount);
+    if (customDraftColors.length !== slotCount) {
+      customDraftColors = Array(slotCount).fill("Red");
+    }
+    customDraftColors[dieIdx] = colorName;
+    v110LockedColors = [...customDraftColors];
+    renderCustomLockerSlots(firebaseNextRoll);
+    window.lockCustomNextRoll();
   };
 
   window.syncWithActiveGameSession = function () {
@@ -708,7 +810,9 @@
   window.setAllLockerColor = function (colorName) {
     const slotCount = Math.min(12, currentDiceCount);
     customDraftColors = Array(slotCount).fill(colorName);
+    v110LockedColors = [...customDraftColors];
     renderCustomLockerSlots(firebaseNextRoll);
+    window.lockCustomNextRoll();
   };
 
   window.lockCustomNextRoll = async function () {
@@ -719,6 +823,14 @@
     for (let i = 0; i < currentDiceCount; i++) {
       fullColors.push(customDraftColors[i % customDraftColors.length] || "Red");
     }
+    v110LockedColors = [...fullColors];
+
+    const updateStatusEl = (namesList) => {
+      const statusEl = document.getElementById("v110LiveLockStatus");
+      if (statusEl) {
+        statusEl.innerHTML = `✅ LOCKED FOR <strong>#${clean}</strong>: <span style="color:#FFEA3D;">${namesList.join(" • ").toUpperCase()}</span> — CLICK "ROLL AGAIN !" ON PC NOW!`;
+      }
+    };
 
     const sess = window.getOfflineDiceSession ? window.getOfflineDiceSession() : null;
     if (sess && Predictor.normalizeGameId(sess.gameId) === clean && window.queueNextRollInFirebase) {
@@ -726,8 +838,9 @@
       if (rollObj) {
         firebaseNextRoll = rollObj;
         selectedHistoryRoll = null;
+        updateStatusEl(rollObj.names);
         renderAllPredictorViews();
-        triggerInterceptBanner(`🔒 LOCKED CUSTOM NEXT DICE FOR #${clean}: ${rollObj.names.join(", ").toUpperCase()}!`);
+        triggerInterceptBanner(`🔒 LOCKED CUSTOM NEXT DICE FOR #${clean}: ${rollObj.names.join(" • ").toUpperCase()}!`);
       }
       return;
     }
@@ -744,28 +857,48 @@
     const db = getFirebaseDb();
     if (db) {
       try {
+        let wrote = false;
         const latest = sessionHistory.length > 0 ? sessionHistory[sessionHistory.length - 1] : null;
-        const targetRef =
-          latest && latest.rollId
-            ? db.ref("sessions/" + clean + "/rolls/" + latest.rollId)
-            : db.ref("sessions/" + clean + "/rolls").push();
-        rollObj.rollId = targetRef.key || "";
-        await targetRef.set({
-          colors: rollObj.colors,
-          names: rollObj.names,
-          time: Date.now(),
-          isRigged: false,
-          hash: rollObj.hash
-        });
+        if (latest && latest.rollId) {
+          try {
+            const existingRef = db.ref("sessions/" + clean + "/rolls/" + latest.rollId);
+            await existingRef.set({
+              colors: rollObj.colors,
+              names: rollObj.names,
+              time: Date.now(),
+              isRigged: false,
+              hash: rollObj.hash
+            });
+            rollObj.rollId = latest.rollId;
+            wrote = true;
+          } catch (innerErr) {
+            wrote = false;
+          }
+        }
+        if (!wrote) {
+          const pushRef = db.ref("sessions/" + clean + "/rolls").push();
+          rollObj.rollId = pushRef.key || "";
+          await pushRef.set({
+            colors: rollObj.colors,
+            names: rollObj.names,
+            time: Date.now(),
+            isRigged: false,
+            hash: rollObj.hash
+          });
+        }
       } catch (e) {}
     }
 
+    updateStatusEl(rollObj.names);
     renderAllPredictorViews();
-    triggerInterceptBanner(`🔒 LOCKED CUSTOM NEXT DICE FOR #${clean}: ${rollObj.names.join(", ").toUpperCase()}!`);
+    triggerInterceptBanner(`🔒 LOCKED CUSTOM NEXT DICE FOR #${clean}: ${rollObj.names.join(" • ").toUpperCase()}!`);
   };
 
   window.clearCustomNextRoll = function () {
     const clean = Predictor.normalizeGameId(activeId);
+    v110LockedColors = [];
+    v110PersistEveryRoll = false;
+    window.setV110PersistMode(false);
     if (clean) {
       try {
         localStorage.removeItem("od_locked_next_" + clean);

@@ -693,3 +693,164 @@ body.split-mode-active #predictorRootSection,
 body.split-mode-active #gameRootSection {
   display: block !important;
 }
+
+/* ============================================================
+   v1.1.0 — 2-OPTION SWITCHER & MOBILE REMOTE COLOR CONTROLLER
+   ============================================================ */
+.v110-option-switcher {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+@media (max-width: 640px) {
+  .v110-option-switcher {
+    grid-template-columns: 1fr;
+  }
+}
+
+.v110-option-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 13px 16px;
+  border-radius: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.16);
+  background: rgba(14, 15, 26, 0.88);
+  color: rgba(255, 255, 255, 0.78);
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.18s ease;
+  font-family: 'Fredoka', sans-serif;
+}
+
+.v110-option-tab:hover {
+  border-color: rgba(0, 210, 255, 0.6);
+  transform: translateY(-1px);
+}
+
+.v110-option-tab.active-opt1 {
+  background: linear-gradient(135deg, rgba(0, 210, 255, 0.22), rgba(14, 24, 48, 0.95));
+  border-color: #00D2FF;
+  color: #FFFFFF;
+  box-shadow: 0 6px 20px rgba(0, 210, 255, 0.25);
+}
+
+.v110-option-tab.active-opt2 {
+  background: linear-gradient(135deg, rgba(255, 234, 61, 0.22), rgba(45, 22, 10, 0.95));
+  border-color: #FFEA3D;
+  color: #FFFFFF;
+  box-shadow: 0 6px 20px rgba(255, 234, 61, 0.25);
+}
+
+.v110-opt-title {
+  font-size: 14.5px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.v110-opt-desc {
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.72);
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+/* Option 2 Remote Color Controller Card */
+.v110-remote-card {
+  background: linear-gradient(180deg, rgba(22, 16, 36, 0.96) 0%, rgba(11, 11, 20, 0.98) 100%);
+  border: 2px solid #FFEA3D;
+  border-radius: 18px;
+  padding: 16px;
+  margin-bottom: 18px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7), 0 0 22px rgba(255, 234, 61, 0.14);
+}
+
+.v110-preset-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin: 10px 0 14px 0;
+}
+
+@media (max-width: 520px) {
+  .v110-preset-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.v110-preset-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 11px 10px;
+  border-radius: 11px;
+  font-family: 'Fredoka', sans-serif;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  color: #FFFFFF;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  transition: transform 0.14s ease, box-shadow 0.14s ease;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.45);
+}
+
+.v110-preset-btn:active {
+  transform: scale(0.96);
+}
+
+.v110-die-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.v110-die-picker-card {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1.5px solid rgba(255, 255, 255, 0.14);
+  border-radius: 12px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.v110-color-swatches {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 5px;
+  width: 100%;
+}
+
+.v110-swatch-btn {
+  height: 28px;
+  border-radius: 7px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  cursor: pointer;
+  font-family: 'Fredoka', sans-serif;
+  font-size: 10px;
+  font-weight: 900;
+  color: #FFFFFF;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.v110-swatch-btn.active {
+  border-color: #FFFFFF;
+  transform: scale(1.1);
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.85);
+}
+
