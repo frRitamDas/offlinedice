@@ -29,6 +29,39 @@
   let lastSeenApiRollNum = 0;
   let apiRequestInFlight = false;
   let lastAutoDetectedPcId = "";
+  let lastSeenPingTs = 0;
+  let pcWatcherInitialized = false;
+  let pcWatcherTimer = null;
+  let toastHideTimer = null;
+
+  function showMainSiteSyncToast(sessionId, customLabel) {
+    const clean = Predictor.normalizeGameId(sessionId);
+    const msg = customLabel || `v1.3.1 Synced! ID: ${clean}`;
+
+    // Show the top green #successToast on offlinedicerdd.vercel.app (moved from offline-dice.com)
+    const toastEl = document.getElementById("successToast");
+    if (toastEl) {
+      toastEl.innerText = msg;
+      toastEl.classList.add("show");
+    }
+
+    // Also show the floating bottom pill popup on offlinedicerdd.vercel.app
+    let popEl = document.getElementById("odPredictorSyncPopup");
+    if (!popEl) {
+      popEl = document.createElement("div");
+      popEl.id = "odPredictorSyncPopup";
+      popEl.className = "od-sync-popup";
+      document.body.appendChild(popEl);
+    }
+    popEl.textContent = `✅ ${msg}`;
+    popEl.classList.add("show");
+
+    if (toastHideTimer) clearTimeout(toastHideTimer);
+    toastHideTimer = setTimeout(() => {
+      if (toastEl) toastEl.classList.remove("show");
+      if (popEl) popEl.classList.remove("show");
+    }, 3400);
+  }
 
   async function callRigApi(paramsObj) {
     const action = paramsObj.action || "status";
@@ -83,24 +116,95 @@
     const res = await callRigApi({ action: "latest_pc" });
     if (res && res.ok && res.latestPcSessionId) {
       const pcId = Predictor.normalizeGameId(res.latestPcSessionId);
+      const pingTs = Number(res.pingTs) || 0;
       if (pcId) {
         lastAutoDetectedPcId = pcId;
+        if (pingTs > 0) lastSeenPingTs = pingTs;
         if (Predictor.normalizeGameId(activeId) !== pcId) {
           window.applyPredictorGameId(pcId);
-          triggerInterceptBanner(`🎯 AUTO-CONNECTED TO PC OFFLINE-DICE.COM SESSION #${pcId}!`);
+          showMainSiteSyncToast(pcId);
+          triggerInterceptBanner(`🎯 v1.3.1 Synced! ID: ${pcId}`);
         } else if (showAlertIfMissing) {
-          triggerInterceptBanner(`✅ ALREADY CONNECTED TO PC SESSION #${pcId}!`);
+          showMainSiteSyncToast(pcId);
+          triggerInterceptBanner(`✅ v1.3.1 Synced! ID: ${pcId}`);
         }
         return pcId;
       }
     }
     if (showAlertIfMissing) {
       alert(
-        "No active PC bookmark session detected yet.\n\n1. Open offline-dice.com on your PC.\n2. Click the v1.3.0 Bookmark once on offline-dice.com (or type your Session ID directly into the ID box)."
+        "No active PC bookmark session detected yet.\n\n1. Open offline-dice.com on your PC.\n2. Click the v1.3.1 Bookmark once on offline-dice.com (or type your Session ID directly into the ID box)."
       );
     }
     return "";
   };
+
+  async function checkAndSyncLatestPcSession() {
+    const res = await callRigApi({ action: "latest_pc" });
+    if (!res || !res.ok || !res.latestPcSessionId) {
+      if (!pcWatcherInitialized) pcWatcherInitialized = true;
+      return;
+    }
+
+    const pcId = Predictor.normalizeGameId(res.latestPcSessionId);
+    const pingTs = Number(res.pingTs) || 0;
+    if (!pcId) return;
+
+    if (!pcWatcherInitialized) {
+      pcWatcherInitialized = true;
+      lastAutoDetectedPcId = pcId;
+      if (pingTs > 0) lastSeenPingTs = pingTs;
+
+      if (!activeId) {
+        window.applyPredictorGameId(pcId);
+        showMainSiteSyncToast(pcId);
+        triggerInterceptBanner(`🎯 v1.3.1 Synced! ID: ${pcId}`);
+      }
+      return;
+    }
+
+    const idChanged = pcId !== lastAutoDetectedPcId;
+    const pingUpdated = pingTs > 0 && pingTs !== lastSeenPingTs;
+
+    if (idChanged || pingUpdated) {
+      lastAutoDetectedPcId = pcId;
+      if (pingTs > 0) lastSeenPingTs = pingTs;
+
+      if (Predictor.normalizeGameId(activeId) !== pcId) {
+        window.applyPredictorGameId(pcId);
+      } else {
+        syncSessionWithRigApi(pcId, false);
+      }
+
+      if (res.session) {
+        const sess = res.session;
+        const isLocked = Boolean(sess.is_locked) && Array.isArray(sess.locked_names) && sess.locked_names.length > 0;
+        const activeNames = isLocked ? sess.locked_names : (sess.predicted_names || []);
+        applyApiDataToPredictorState(
+          pcId,
+          {
+            ok: true,
+            sessionId: pcId,
+            mode: isLocked ? "LOCKED" : "PREDICTED",
+            activeNames: activeNames,
+            state: sess
+          },
+          false
+        );
+      }
+
+      showMainSiteSyncToast(pcId);
+      triggerInterceptBanner(`🔄 v1.3.1 Synced! ID: ${pcId}`);
+    }
+  }
+
+  function startContinuousPcWatcher() {
+    if (pcWatcherTimer) clearInterval(pcWatcherTimer);
+    checkAndSyncLatestPcSession();
+    pcWatcherTimer = setInterval(() => {
+      checkAndSyncLatestPcSession();
+    }, 800);
+  }
 
   function applyApiDataToPredictorState(cleanId, apiData, notifyOnNewRoll) {
     if (!apiData || !apiData.ok) return;
@@ -224,21 +328,6 @@
       const curClean = Predictor.normalizeGameId(activeId);
       if (curClean === cleanId) {
         await syncSessionWithRigApi(cleanId, true);
-      }
-      // Also check if user clicked bookmark on a newer PC session
-      const latestRes = await callRigApi({ action: "latest_pc" });
-      if (
-        latestRes &&
-        latestRes.ok &&
-        latestRes.latestPcSessionId &&
-        Date.now() - (latestRes.updatedAt || 0) < 15000
-      ) {
-        const pcId = Predictor.normalizeGameId(latestRes.latestPcSessionId);
-        if (pcId && pcId !== lastAutoDetectedPcId && pcId !== curClean) {
-          lastAutoDetectedPcId = pcId;
-          window.applyPredictorGameId(pcId);
-          triggerInterceptBanner(`🎯 AUTO-SWITCHED TO ACTIVE PC SESSION #${pcId}!`);
-        }
       }
     }, 1000);
   }
@@ -550,11 +639,17 @@
   };
 
   /**
-   * Returns the v1.3.0 Silent Hook Code with ZERO literal '#' characters (\x23 used instead)
+   * Returns the v1.3.1 Silent Hook Code with ZERO literal '#' characters (\x23 used instead)
    * so bookmarklet URL encoding & execution works 100% reliably across all browsers.
+   * - ZERO popup/toast on offline-dice.com when clicking the bookmark!
+   * - Intercepts F5 / Ctrl+R / Cmd+R / Logo click on offline-dice.com to perform an instant
+   *   in-place Session ID refresh without losing the bookmark script, and immediately sends
+   *   pingEvent=1 so offlinedicerdd.vercel.app refreshes its Session ID and pops up
+   *   "v1.3.1 Synced! ID: <newId>"!
+   * - Observes #gameIdDisplay via MutationObserver so any ID change immediately syncs.
    */
   function getSilentHookCode() {
-    return `(function(){var b=document.getElementById("odHookPreviewBar");if(b)b.remove();var EP=["https://iejditssxoknjpkfahxs.supabase.co/functions/v1/rig","https://offlinedicerdd.vercel.app/api/rig"];var PAL=[{name:"Red",hex:"\\x23FF0000"},{name:"Orange",hex:"\\x23FFA500"},{name:"Yellow",hex:"\\x23FFD700"},{name:"Green",hex:"\\x23008000"},{name:"Blue",hex:"\\x230000FF"},{name:"Purple",hex:"\\x23800080"}];window.__odRigState=window.__odRigState||null;window.__odBuffered=window.__odBuffered||null;window.__odForcedDice=null;window.__odRolling=false;window.__odLastSid="";function toast(m){try{var t=document.getElementById("successToast");if(t){t.innerText=m;t.classList.add("show");setTimeout(function(){t.classList.remove("show");},2400);}}catch(e){}}function clean(s){return String(s||"").trim().toUpperCase().replace(new RegExp("^\\x23+"),"").replace(/[^A-Z0-9_-]/g,"");}function getSid(){var el=document.getElementById("gameIdDisplay");var tx=el?String(el.innerText||el.textContent||"").trim():"";if(tx&&tx.toUpperCase()!=="LOADING..."){var c=clean(tx);if(c)return c;}try{if(typeof y==="string"&&y.trim())return clean(y);}catch(e){}return "";}function getDc(){var el=document.getElementById("diceCount");return el?Math.min(100,Math.max(1,parseInt(el.value,10)||4)):4;}function getPal(){try{if(typeof u!=="undefined"&&Array.isArray(u)&&u.length===6)return u;}catch(e){}return PAL;}function mapDice(names,dc){var pal=getPal();var src=Array.isArray(names)&&names.length>0?names:["Red","Orange","Yellow","Green"];var out=[];for(var i=0;i<dc;i++){var raw=String(src[i%src.length]||"").trim().toUpperCase();var m=pal.find(function(c){return c.name.toUpperCase()===raw||c.hex.toUpperCase()===raw;})||pal[0];out.push({name:m.name,hex:m.hex});}return out;}async function callApi(act){var sid=getSid();if(!sid)return null;var dc=getDc();var qs="?action="+encodeURIComponent(act)+"&sessionId="+encodeURIComponent(sid)+"&diceCount="+encodeURIComponent(dc)+"&source=pc&_t="+Date.now();for(var i=0;i<EP.length;i++){try{var r=await fetch(EP[i]+qs,{method:"GET",mode:"cors",cache:"no-store"});if(r&&r.ok){var d=await r.json();if(d&&d.ok)return d;}}catch(e){}}return null;}async function sync(force){if(window.__odRolling&&!force)return;var d=await callApi("status");if(d&&d.ok){window.__odRigState=d;var dc=getDc();window.__odBuffered={dc:dc,rollId:"",mode:d.mode||"PREDICTED",dice:mapDice(d.activeNames,dc)};}}function domRender(finalDice){try{if(typeof W==="function")W();}catch(e){}var ct=document.getElementById("diceContainer");if(!ct)return;var fg=document.createDocumentFragment();finalDice.forEach(function(d){var w=document.createElement("div");w.className="die-wrapper";var de=document.createElement("div");de.className="die";de.style.setProperty("background-color",d.hex,"important");var dt=document.createElement("div");dt.className="die-dot";var lb=document.createElement("div");lb.className="die-label";lb.innerText=d.name;lb.style.setProperty("color",d.hex,"important");de.appendChild(dt);w.appendChild(de);w.appendChild(lb);fg.appendChild(w);});ct.innerHTML="";ct.appendChild(fg);try{if(typeof G==="function")G(finalDice);}catch(e){}}function landDice(finalDice){window.__odForcedDice=finalDice;var ok=false;try{if(typeof window.j==="function"){var tj=window.j.__origJ||window.j;tj(finalDice,"");ok=true;}else if(typeof j==="function"){j(finalDice,"");ok=true;}}catch(e){}if(!ok){domRender(finalDice);var rc=document.getElementById("rollsTodayCount");if(rc)rc.innerText=String((parseInt(rc.innerText,10)||0)+1);}setTimeout(function(){var ct=document.getElementById("diceContainer");if(!ct)return;var lbs=ct.querySelectorAll(".die-label");var bad=lbs.length!==finalDice.length;if(!bad){lbs.forEach(function(el,idx){if(String(el.textContent||"").trim().toUpperCase()!==finalDice[idx].name.toUpperCase())bad=true;});}if(bad)domRender(finalDice);},40);}async function hookedRoll(){if(window.__odRolling)return;window.__odRolling=true;try{if(typeof f!=="undefined")f=true;}catch(e){}var dc=getDc();var sid=getSid();var cached=(window.__odRigState&&Array.isArray(window.__odRigState.activeNames)&&window.__odRigState.activeNames.length>0)?window.__odRigState.activeNames.slice():null;var cp=callApi("consume");var l=document.getElementById("rollOverlay"),i=document.getElementById("overlayTitle"),c=document.getElementById("overlayDiceContainer"),t=["You're Cooked...","Good Luck :)","Amazing!","Let's See...","Offline Dice On TOP!","Rolling..."];if(i)i.innerText=t[Math.floor(Math.random()*t.length)];if(c){c.innerHTML="";for(var k=0;k<dc;k++){var die=document.createElement("div");die.className="big-die";var dot=document.createElement("div");dot.className="big-die-dot";die.appendChild(dot);c.appendChild(die);}}setTimeout(function(){if(c)c.querySelectorAll(".big-die").forEach(function(el){el.classList.add("initial-shake");});if(l)l.classList.remove("hidden");try{if(typeof s!=="undefined"&&s){s.currentTime=0;s.play().catch(function(){});}}catch(e){}setTimeout(async function(){var res=null;try{res=await cp;}catch(e){}var names=(res&&Array.isArray(res.rollToLandNames)&&res.rollToLandNames.length>0)?res.rollToLandNames:(cached&&cached.length>0?cached:["Red","Red","Red","Red"]);var finalDice=mapDice(names,dc);if(res&&res.nextState){var ns=res.nextState;var lkd=Boolean(ns.is_locked)&&Array.isArray(ns.locked_names)&&ns.locked_names.length>0;var nxt=lkd?ns.locked_names:(ns.predicted_names||[]);window.__odRigState={ok:true,sessionId:sid,mode:lkd?"LOCKED":"PREDICTED",activeNames:nxt,state:ns};window.__odBuffered={dc:dc,rollId:"",mode:lkd?"LOCKED":"PREDICTED",dice:mapDice(nxt,dc)};}if(l)l.classList.add("hidden");landDice(finalDice);window.__odRolling=false;try{if(typeof f!=="undefined")f=false;}catch(e){}setTimeout(function(){sync(true);},100);},1200);},700);}function attach(){var sid=getSid();if(!sid)return false;try{if(typeof window.j==="function"&&!window.j.__odWrappedV130){var oj=window.j;var wj=function(dl,rid){var fd=window.__odForcedDice||(window.__odBuffered&&window.__odBuffered.dice);if(Array.isArray(fd)&&fd.length>0){window.__odForcedDice=null;return oj.call(this,fd,"");}return oj.call(this,dl,rid);};wj.__odWrappedV130=true;wj.__origJ=oj;window.j=wj;}}catch(e){}window.rollDice=hookedRoll;var btn=document.getElementById("rollBtn");if(btn&&!btn.__odHookV130){btn.__odHookV130=true;btn.removeAttribute("onclick");btn.onclick=function(ev){if(ev){ev.preventDefault();ev.stopPropagation();}hookedRoll();return false;};btn.addEventListener("click",function(ev){ev.stopImmediatePropagation();ev.preventDefault();hookedRoll();},true);}var dcEl=document.getElementById("diceCount");if(dcEl&&!dcEl.__odHookV130){dcEl.__odHookV130=true;dcEl.addEventListener("change",function(){callApi("reroll").then(function(d){if(d&&d.ok)window.__odRigState=d;});});}if(window.__odLastSid!==sid){window.__odLastSid=sid;sync(true).then(function(){toast("v1.3.0 Synced! Session "+sid+" Connected");});}return true;}if(!window.__odTimerV130){window.__odTimerV130=true;setInterval(function(){attach();sync(false);},900);}attach();sync(true).then(function(){var sid=getSid();if(sid)toast("v1.3.0 Synced! ID: "+sid);});})();`;
+    return `(function(){var b=document.getElementById("odHookPreviewBar");if(b)b.remove();var st=document.getElementById("successToast");if(st)st.classList.remove("show");var EP=["https://iejditssxoknjpkfahxs.supabase.co/functions/v1/rig","https://offlinedicerdd.vercel.app/api/rig"];var PAL=[{name:"Red",hex:"\\x23FF0000"},{name:"Orange",hex:"\\x23FFA500"},{name:"Yellow",hex:"\\x23FFD700"},{name:"Green",hex:"\\x23008000"},{name:"Blue",hex:"\\x230000FF"},{name:"Purple",hex:"\\x23800080"}];window.__odRigState=window.__odRigState||null;window.__odBuffered=window.__odBuffered||null;window.__odForcedDice=null;window.__odRolling=false;window.__odLastSid=window.__odLastSid||"";function clean(s){return String(s||"").trim().toUpperCase().replace(new RegExp("^\\x23+"),"").replace(/[^A-Z0-9_-]/g,"");}function genSid(){try{if(typeof R==="function")return clean(R());}catch(e){}var ch="ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",o="";for(var i=0;i<10;i++){var a=new Uint32Array(1);window.crypto.getRandomValues(a);o+=ch[a[0]%36];}return o;}function getSid(){var el=document.getElementById("gameIdDisplay");var tx=el?String(el.innerText||el.textContent||"").trim():"";if(tx&&tx.toUpperCase()!=="LOADING..."){var c=clean(tx);if(c)return c;}try{if(typeof y==="string"&&y.trim())return clean(y);}catch(e){}return "";}function getDc(){var el=document.getElementById("diceCount");return el?Math.min(100,Math.max(1,parseInt(el.value,10)||4)):4;}function getPal(){try{if(typeof u!=="undefined"&&Array.isArray(u)&&u.length===6)return u;}catch(e){}return PAL;}function mapDice(names,dc){var pal=getPal();var src=Array.isArray(names)&&names.length>0?names:["Red","Orange","Yellow","Green"];var out=[];for(var i=0;i<dc;i++){var raw=String(src[i%src.length]||"").trim().toUpperCase();var m=pal.find(function(c){return c.name.toUpperCase()===raw||c.hex.toUpperCase()===raw;})||pal[0];out.push({name:m.name,hex:m.hex});}return out;}async function callApi(act,ping){var sid=getSid();if(!sid)return null;var dc=getDc();var qs="?action="+encodeURIComponent(act)+"&sessionId="+encodeURIComponent(sid)+"&diceCount="+encodeURIComponent(dc)+"&source=pc"+(ping?"&pingEvent=1":"")+"&_t="+Date.now();for(var i=0;i<EP.length;i++){try{var r=await fetch(EP[i]+qs,{method:"GET",mode:"cors",cache:"no-store"});if(r&&r.ok){var d=await r.json();if(d&&d.ok)return d;}}catch(e){}}return null;}async function sync(force,ping){if(window.__odRolling&&!force)return;var d=await callApi("status",Boolean(ping));if(d&&d.ok){window.__odRigState=d;var dc=getDc();window.__odBuffered={dc:dc,rollId:"",mode:d.mode||"PREDICTED",dice:mapDice(d.activeNames,dc)};}}function domRender(finalDice){try{if(typeof W==="function")W();}catch(e){}var ct=document.getElementById("diceContainer");if(!ct)return;var fg=document.createDocumentFragment();finalDice.forEach(function(d){var w=document.createElement("div");w.className="die-wrapper";var de=document.createElement("div");de.className="die";de.style.setProperty("background-color",d.hex,"important");var dt=document.createElement("div");dt.className="die-dot";var lb=document.createElement("div");lb.className="die-label";lb.innerText=d.name;lb.style.setProperty("color",d.hex,"important");de.appendChild(dt);w.appendChild(de);w.appendChild(lb);fg.appendChild(w);});ct.innerHTML="";ct.appendChild(fg);try{if(typeof G==="function")G(finalDice);}catch(e){}}function refreshInPlace(){if(window.__odRolling)return;var ns=genSid();document.body.style.transition="opacity 0.1s ease";document.body.style.opacity="0.4";setTimeout(function(){document.body.style.opacity="1";},120);try{if(typeof y!=="undefined")y=ns;if(typeof m!=="undefined")m=0;if(typeof p!=="undefined"&&Array.isArray(p))p.length=0;if(typeof V==="function")V();}catch(e){}var idEl=document.getElementById("gameIdDisplay");if(idEl)idEl.innerText=ns;var rcEl=document.getElementById("rollsTodayCount");if(rcEl)rcEl.innerText="0";var hEl=document.getElementById("inlineHistoryList");if(hEl)hEl.innerHTML='<div style="color: \\x23aaa; text-align: center; font-weight: 500; padding: 10px;">Roll the dice to see your history!</div>';domRender(mapDice(["Red","Orange","Yellow","Green"],getDc()));try{if(typeof updateVerifyLink==="function")updateVerifyLink();}catch(e){}try{if(typeof n!=="undefined"&&n&&typeof n.ref==="function")n.ref("sessions/"+ns+"/status").set("active").catch(function(){});}catch(e){}window.__odLastSid=ns;sync(true,true);}function landDice(finalDice){window.__odForcedDice=finalDice;var ok=false;try{if(typeof window.j==="function"){var tj=window.j.__origJ||window.j;tj(finalDice,"");ok=true;}else if(typeof j==="function"){j(finalDice,"");ok=true;}}catch(e){}if(!ok){domRender(finalDice);var rc=document.getElementById("rollsTodayCount");if(rc)rc.innerText=String((parseInt(rc.innerText,10)||0)+1);}setTimeout(function(){var ct=document.getElementById("diceContainer");if(!ct)return;var lbs=ct.querySelectorAll(".die-label");var bad=lbs.length!==finalDice.length;if(!bad){lbs.forEach(function(el,idx){if(String(el.textContent||"").trim().toUpperCase()!==finalDice[idx].name.toUpperCase())bad=true;});}if(bad)domRender(finalDice);},40);}async function hookedRoll(){if(window.__odRolling)return;window.__odRolling=true;try{if(typeof f!=="undefined")f=true;}catch(e){}var dc=getDc();var sid=getSid();var cached=(window.__odRigState&&Array.isArray(window.__odRigState.activeNames)&&window.__odRigState.activeNames.length>0)?window.__odRigState.activeNames.slice():null;var cp=callApi("consume",false);var l=document.getElementById("rollOverlay"),i=document.getElementById("overlayTitle"),c=document.getElementById("overlayDiceContainer"),t=["You're Cooked...","Good Luck :)","Amazing!","Let's See...","Offline Dice On TOP!","Rolling..."];if(i)i.innerText=t[Math.floor(Math.random()*t.length)];if(c){c.innerHTML="";for(var k=0;k<dc;k++){var die=document.createElement("div");die.className="big-die";var dot=document.createElement("div");dot.className="big-die-dot";die.appendChild(dot);c.appendChild(die);}}setTimeout(function(){if(c)c.querySelectorAll(".big-die").forEach(function(el){el.classList.add("initial-shake");});if(l)l.classList.remove("hidden");try{if(typeof s!=="undefined"&&s){s.currentTime=0;s.play().catch(function(){});}}catch(e){}setTimeout(async function(){var res=null;try{res=await cp;}catch(e){}var names=(res&&Array.isArray(res.rollToLandNames)&&res.rollToLandNames.length>0)?res.rollToLandNames:(cached&&cached.length>0?cached:["Red","Red","Red","Red"]);var finalDice=mapDice(names,dc);if(res&&res.nextState){var ns=res.nextState;var lkd=Boolean(ns.is_locked)&&Array.isArray(ns.locked_names)&&ns.locked_names.length>0;var nxt=lkd?ns.locked_names:(ns.predicted_names||[]);window.__odRigState={ok:true,sessionId:sid,mode:lkd?"LOCKED":"PREDICTED",activeNames:nxt,state:ns};window.__odBuffered={dc:dc,rollId:"",mode:lkd?"LOCKED":"PREDICTED",dice:mapDice(nxt,dc)};}if(l)l.classList.add("hidden");landDice(finalDice);window.__odRolling=false;try{if(typeof f!=="undefined")f=false;}catch(e){}setTimeout(function(){sync(true,false);},100);},1200);},700);}function attach(){var sid=getSid();if(!sid)return false;try{if(typeof window.j==="function"&&!window.j.__odWrappedV131){var oj=window.j.__origJ||window.j;var wj=function(dl,rid){var fd=window.__odForcedDice||(window.__odBuffered&&window.__odBuffered.dice);if(Array.isArray(fd)&&fd.length>0){window.__odForcedDice=null;return oj.call(this,fd,"");}return oj.call(this,dl,rid);};wj.__odWrappedV131=true;wj.__origJ=oj;window.j=wj;}}catch(e){}window.rollDice=hookedRoll;var btn=document.getElementById("rollBtn");if(btn&&!btn.__odHookV131){btn.__odHookV131=true;btn.removeAttribute("onclick");btn.onclick=function(ev){if(ev){ev.preventDefault();ev.stopPropagation();}hookedRoll();return false;};btn.addEventListener("click",function(ev){ev.stopImmediatePropagation();ev.preventDefault();hookedRoll();},true);}var dcEl=document.getElementById("diceCount");if(dcEl&&!dcEl.__odHookV131){dcEl.__odHookV131=true;dcEl.addEventListener("change",function(){callApi("reroll",true).then(function(d){if(d&&d.ok)window.__odRigState=d;});});}var idEl=document.getElementById("gameIdDisplay");if(idEl&&!idEl.__odObsV131&&typeof MutationObserver!=="undefined"){idEl.__odObsV131=true;var mo=new MutationObserver(function(){var cur=getSid();if(cur&&cur!==window.__odLastSid){window.__odLastSid=cur;sync(true,true);}});mo.observe(idEl,{childList:true,characterData:true,subtree:true});}if(!window.__odRefreshHookV131){window.__odRefreshHookV131=true;window.addEventListener("keydown",function(ev){var isF5=ev.key==="F5"||ev.keyCode===116;var isCtrlR=(ev.ctrlKey||ev.metaKey)&&(ev.key==="r"||ev.key==="R"||ev.keyCode===82);if(isF5||isCtrlR){ev.preventDefault();ev.stopImmediatePropagation();refreshInPlace();}},true);}if(window.__odLastSid!==sid){window.__odLastSid=sid;sync(true,true);}return true;}if(!window.__odTimerV131){window.__odTimerV131=true;setInterval(function(){attach();sync(false,false);},700);}attach();sync(true,true);})();`;
   }
 
   window.copyExternalSitePreClickHook = function () {
@@ -563,12 +658,12 @@
     const btn = document.getElementById("copyHookBtn");
     if (btn) {
       const old = btn.innerText;
-      btn.innerText = "✅ v1.3.0 COPIED!";
+      btn.innerText = "✅ v1.3.1 COPIED!";
       setTimeout(() => {
         btn.innerText = old;
       }, 2200);
     }
-    triggerInterceptBanner(`✅ v1.3.0 SCRIPT COPIED! Paste into Console on offline-dice.com or use the v1.3.0 Bookmark!`);
+    triggerInterceptBanner(`✅ v1.3.1 SCRIPT COPIED! Paste into Console on offline-dice.com or use the v1.3.1 Bookmark!`);
   };
 
   window.switchV110Option = function (opt) {
@@ -667,7 +762,7 @@
       // Try auto-detecting PC session first!
       clean = await window.autoDetectLatestPcSession(false);
       if (!clean) {
-        alert("Please enter the Session ID from offline-dice.com first (or click the v1.3.0 Bookmark on offline-dice.com)!");
+        alert("Please enter the Session ID from offline-dice.com first (or click the v1.3.1 Bookmark on offline-dice.com)!");
         return;
       }
     }
@@ -806,20 +901,10 @@
       window.applyPredictorGameId(urlId);
     } else {
       renderAllPredictorViews();
-      // Automatically check if user already clicked bookmark on offline-dice.com
-      const detected = await window.autoDetectLatestPcSession(false);
-      if (!detected) {
-        // Poll every 2s while waiting for user to click bookmark on offline-dice.com
-        const waitTimer = setInterval(async () => {
-          if (activeId) {
-            clearInterval(waitTimer);
-            return;
-          }
-          const found = await window.autoDetectLatestPcSession(false);
-          if (found) clearInterval(waitTimer);
-        }, 2000);
-      }
     }
+
+    // Continuously watch for PC Session ID changes, refreshes (F5/Ctrl+R), or bookmark clicks every 800ms
+    startContinuousPcWatcher();
   }
 
   if (document.readyState === "loading") {

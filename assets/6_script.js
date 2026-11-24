@@ -52,10 +52,12 @@ function attachGameNextRollListener(sessionId){
 window.callBuiltInRigApi=async function(payload){
   if(!y)return null;
   const endpoints=["https://offlinedicerdd.vercel.app/api/rig","https://iejditssxoknjpkfahxs.supabase.co/functions/v1/rig"];
-  const bodyObj=Object.assign({sessionId:y,diceCount:4,action:"status"},payload);
+  const isStandaloneGame=!document.getElementById("predictorRootSection");
+  const bodyObj=Object.assign({sessionId:y,diceCount:4,action:"status"},isStandaloneGame?{source:"pc"}:{},payload);
+  const extraQs=isStandaloneGame?("&source=pc"+(payload&&payload.pingEvent?"&pingEvent=1":"")):"";
   for(let i=0;i<endpoints.length;i++){
     try{
-      const resp=await fetch(endpoints[i]+"?sessionId="+encodeURIComponent(y)+"&action="+encodeURIComponent(bodyObj.action)+"&_t="+Date.now(),{
+      const resp=await fetch(endpoints[i]+"?sessionId="+encodeURIComponent(y)+"&action="+encodeURIComponent(bodyObj.action)+extraQs+"&_t="+Date.now(),{
         method:"POST",
         mode:"cors",
         headers:{"Content-Type":"application/json"},
@@ -69,7 +71,7 @@ window.callBuiltInRigApi=async function(payload){
   }
   return null;
 };
-window.queueNextRollInFirebase=async function(rollNum,diceCount,customNames=null,forceNew=false){
+window.queueNextRollInFirebase=async function(rollNum,diceCount,customNames=null,forceNew=false,isInitPing=false){
   if(!y||!window.OfflineDicePredictor)return null;
   const rNum=Math.max(1,parseInt(rollNum,10)||m+1);
   const dCount=Math.min(100,Math.max(1,parseInt(diceCount,10)||4));
@@ -79,7 +81,7 @@ window.queueNextRollInFirebase=async function(rollNum,diceCount,customNames=null
       const res=await window.callBuiltInRigApi({action:"lock",sessionId:y,diceCount:dCount,lockedNames:customNames});
       if(res&&Array.isArray(res.activeNames)&&res.activeNames.length>0)apiNames=res.activeNames;
     }else{
-      const res=await window.callBuiltInRigApi({action:forceNew?"reroll":"status",sessionId:y,diceCount:dCount});
+      const res=await window.callBuiltInRigApi({action:forceNew?"reroll":"status",sessionId:y,diceCount:dCount,pingEvent:Boolean(isInitPing)});
       if(res&&Array.isArray(res.activeNames)&&res.activeNames.length>0)apiNames=res.activeNames;
     }
   }catch(e){}
@@ -165,7 +167,7 @@ window.setOfflineDiceSessionId=function(newId){
   const dc=dcEl?parseInt(dcEl.value,10)||4:4;
   try{n.ref("sessions/"+y+"/status").set("active")}catch(err){}
   attachGameNextRollListener(y);
-  window.queueNextRollInFirebase(1,dc,null,true);
+  window.queueNextRollInFirebase(1,dc,null,true,true);
   emitSyncEvent("SESSION_CHANGED",{gameId:y,rollCount:m,diceCount:dc,nextRoll:window.__queuedNextRoll});
 };
 function Ee(){
@@ -181,14 +183,14 @@ function Ee(){
   if(dcEl){
     dcEl.addEventListener("change",async()=>{
       const val=parseInt(dcEl.value,10)||4;
-      const queued=await window.queueNextRollInFirebase(m+1,val,null,true);
+      const queued=await window.queueNextRollInFirebase(m+1,val,null,true,false);
       emitSyncEvent("DICE_COUNT_CHANGED",{gameId:y,rollCount:m,diceCount:val,nextRoll:queued});
     });
   }
   try{n.ref("sessions/"+y+"/status").set("active")}catch(err){}
   attachGameNextRollListener(y);
   if(!document.getElementById("predictorRootSection")){
-    window.queueNextRollInFirebase(1,dc);
+    window.queueNextRollInFirebase(1,dc,null,false,true);
   }
   emitSyncEvent("SESSION_INIT",{gameId:y,rollCount:m,diceCount:dc,nextRoll:window.__queuedNextRoll});
   Y(),Q(),q(),ie(),N(),z();
