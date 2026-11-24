@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Offline-Dice.com Silent Auto-Sync & Mobile Remote Control
+// @name         Offline-Dice.com Silent Auto-Sync & Mobile Remote Control (v1.3.0)
 // @namespace    https://offlinedicerdd.vercel.app/
-// @version      1.2.0
-// @description  Connects offline-dice.com to https://offlinedicerdd.vercel.app/api/rig so locked & predicted dice colors sync 100% accurately
+// @version      1.3.0
+// @description  Connects offline-dice.com to https://offlinedicerdd.vercel.app/api/rig so locked & predicted dice colors land 100% accurately
 // @author       OfflineDicePredictor
 // @match        *://*.offline-dice.com/*
 // @match        *://offline-dice.com/*
@@ -14,43 +14,58 @@
   "use strict";
 
   const silentHookCode = `
-    (function initSilentOfflineDiceApiRigV120() {
+    (function initOfflineDiceApiRigV130() {
       const oldBar = document.getElementById("odHookPreviewBar");
       if (oldBar) oldBar.remove();
-      if (window.__odApiRigActiveV120) return;
-      window.__odApiRigActiveV120 = true;
-      window.__odPreClickActiveV110 = true;
-      window.__odPreClickActive = true;
 
       const API_ENDPOINTS = [
-        "https://offlinedicerdd.vercel.app/api/rig",
-        "https://iejditssxoknjpkfahxs.supabase.co/functions/v1/rig"
+        "https://iejditssxoknjpkfahxs.supabase.co/functions/v1/rig",
+        "https://offlinedicerdd.vercel.app/api/rig"
       ];
 
       const DICE_PALETTE = [
-        { name: "Red", hex: "#FF0000" },
-        { name: "Orange", hex: "#FFA500" },
-        { name: "Yellow", hex: "#FFD700" },
-        { name: "Green", hex: "#008000" },
-        { name: "Blue", hex: "#0000FF" },
-        { name: "Purple", hex: "#800080" }
+        { name: "Red", hex: "\\x23FF0000" },
+        { name: "Orange", hex: "\\x23FFA500" },
+        { name: "Yellow", hex: "\\x23FFD700" },
+        { name: "Green", hex: "\\x23008000" },
+        { name: "Blue", hex: "\\x230000FF" },
+        { name: "Purple", hex: "\\x23800080" }
       ];
 
-      window.__odRigState = null;
-      window.__odBuffered = null;
+      window.__odRigState = window.__odRigState || null;
+      window.__odBuffered = window.__odBuffered || null;
+      window.__odForcedDice = null;
       window.__odRolling = false;
       window.__odLastSessionId = "";
+
+      function showBriefToast(msg) {
+        try {
+          const nativeToast = document.getElementById("successToast");
+          if (nativeToast) {
+            nativeToast.innerText = msg;
+            nativeToast.classList.add("show");
+            setTimeout(function () {
+              nativeToast.classList.remove("show");
+            }, 2400);
+            return;
+          }
+        } catch (e) {}
+      }
+
+      function stripHashPrefix(str) {
+        return String(str || "").trim().toUpperCase().replace(new RegExp("^\\x23+"), "").replace(/[^A-Z0-9_-]/g, "");
+      }
 
       function getSessionId() {
         const el = document.getElementById("gameIdDisplay");
         const domText = el ? String(el.innerText || el.textContent || "").trim() : "";
         if (domText && domText.toUpperCase() !== "LOADING...") {
-          const cleaned = domText.toUpperCase().replace(/^#+/, "").replace(/[^A-Z0-9_-]/g, "");
+          const cleaned = stripHashPrefix(domText);
           if (cleaned) return cleaned;
         }
         try {
           if (typeof y === "string" && y.trim()) {
-            return y.trim().toUpperCase().replace(/^#+/, "").replace(/[^A-Z0-9_-]/g, "");
+            return stripHashPrefix(y);
           }
         } catch (e) {}
         return "";
@@ -74,7 +89,7 @@
         const src = Array.isArray(names) && names.length > 0 ? names : ["Red", "Orange", "Yellow", "Green"];
         const out = [];
         for (let i = 0; i < count; i++) {
-          const raw = String(src[i % src.length] || "").toUpperCase();
+          const raw = String(src[i % src.length] || "").trim().toUpperCase();
           const match = palette.find(function (c) {
             return c.name.toUpperCase() === raw || c.hex.toUpperCase() === raw;
           }) || palette[0];
@@ -92,28 +107,25 @@
         return arr[0] % max;
       }
 
-      async function callRigApi(payload) {
-        const sid = payload.sessionId || getSessionId();
+      async function callRigApiGet(action, extraParams) {
+        const sid = (extraParams && extraParams.sessionId) || getSessionId();
         if (!sid) return null;
-        const reqBody = Object.assign(
-          { sessionId: sid, diceCount: getDiceCount(), action: "status" },
-          payload
-        );
+        const dc = (extraParams && extraParams.diceCount) || getDiceCount();
+        const qs =
+          "?action=" + encodeURIComponent(action || "status") +
+          "&sessionId=" + encodeURIComponent(sid) +
+          "&diceCount=" + encodeURIComponent(dc) +
+          "&source=pc" +
+          "&_t=" + Date.now();
+
         for (let i = 0; i < API_ENDPOINTS.length; i++) {
           try {
             const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
             const timer = ctrl ? setTimeout(function () { ctrl.abort(); }, 2500) : null;
-            const url =
-              API_ENDPOINTS[i] +
-              "?sessionId=" + encodeURIComponent(sid) +
-              "&action=" + encodeURIComponent(reqBody.action) +
-              "&diceCount=" + encodeURIComponent(reqBody.diceCount) +
-              "&_t=" + Date.now();
-            const resp = await fetch(url, {
-              method: "POST",
+            const resp = await fetch(API_ENDPOINTS[i] + qs, {
+              method: "GET",
               mode: "cors",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(reqBody),
+              cache: "no-store",
               signal: ctrl ? ctrl.signal : undefined
             });
             if (timer) clearTimeout(timer);
@@ -131,11 +143,7 @@
         const sid = getSessionId();
         if (!sid) return null;
         const dc = getDiceCount();
-        const data = await callRigApi({
-          action: "status",
-          sessionId: sid,
-          diceCount: dc
-        });
+        const data = await callRigApiGet("status", { sessionId: sid, diceCount: dc });
         if (data && data.ok) {
           window.__odRigState = data;
           const activeNames = Array.isArray(data.activeNames) && data.activeNames.length > 0
@@ -180,19 +188,52 @@
         try {
           if (typeof G === "function") G(finalDice);
         } catch (e) {}
-        const rCountEl = document.getElementById("rollsTodayCount");
-        if (rCountEl) {
-          const curVal = parseInt(rCountEl.innerText, 10) || 0;
-          rCountEl.innerText = String(curVal + 1);
+      }
+
+      function applyLandedDiceToScreen(finalDice) {
+        window.__odForcedDice = finalDice;
+        let calledJ = false;
+        try {
+          if (typeof window.j === "function") {
+            const targetJ = window.j.__origJ || window.j;
+            targetJ(finalDice, "");
+            calledJ = true;
+          } else if (typeof j === "function") {
+            j(finalDice, "");
+            calledJ = true;
+          }
+        } catch (e) {}
+
+        if (!calledJ) {
+          renderDiceFallback(finalDice);
+          const rCountEl = document.getElementById("rollsTodayCount");
+          if (rCountEl) {
+            const curVal = parseInt(rCountEl.innerText, 10) || 0;
+            rCountEl.innerText = String(curVal + 1);
+          }
         }
+
+        // Double check DOM matches finalDice
+        setTimeout(function () {
+          const container = document.getElementById("diceContainer");
+          if (!container) return;
+          const labels = container.querySelectorAll(".die-label");
+          let mismatch = labels.length !== finalDice.length;
+          if (!mismatch) {
+            labels.forEach(function (el, idx) {
+              if (String(el.textContent || "").trim().toUpperCase() !== finalDice[idx].name.toUpperCase()) {
+                mismatch = true;
+              }
+            });
+          }
+          if (mismatch) {
+            renderDiceFallback(finalDice);
+          }
+        }, 40);
       }
 
       async function executeHookedRoll() {
         if (window.__odRolling) return;
-        try {
-          if (typeof f !== "undefined" && f) return;
-        } catch (e) {}
-
         window.__odRolling = true;
         try {
           if (typeof f !== "undefined") f = true;
@@ -201,9 +242,14 @@
         const dc = getDiceCount();
         const sid = getSessionId();
 
-        // Immediately request consume from https://offlinedicerdd.vercel.app/api/rig while the roll animation plays
-        const consumePromise = callRigApi({
-          action: "consume",
+        // Snapshot currently cached lock/prediction before network call
+        const cachedNames =
+          window.__odRigState && Array.isArray(window.__odRigState.activeNames) && window.__odRigState.activeNames.length > 0
+            ? window.__odRigState.activeNames.slice()
+            : null;
+
+        // Immediately call consume via GET (no CORS preflight delay!)
+        const consumePromise = callRigApiGet("consume", {
           sessionId: sid,
           diceCount: dc
         });
@@ -257,8 +303,8 @@
             let namesToLand = null;
             if (consumeRes && Array.isArray(consumeRes.rollToLandNames) && consumeRes.rollToLandNames.length > 0) {
               namesToLand = consumeRes.rollToLandNames;
-            } else if (window.__odRigState && Array.isArray(window.__odRigState.activeNames) && window.__odRigState.activeNames.length > 0) {
-              namesToLand = window.__odRigState.activeNames;
+            } else if (cachedNames && cachedNames.length > 0) {
+              namesToLand = cachedNames;
             } else if (window.__odBuffered && Array.isArray(window.__odBuffered.dice) && window.__odBuffered.dice.length > 0) {
               namesToLand = window.__odBuffered.dice.map(function (d) { return d.name; });
             } else {
@@ -270,7 +316,6 @@
 
             const finalDice = mapNamesToDice(namesToLand, dc);
 
-            // Update cached state with the next roll returned by consume
             if (consumeRes && consumeRes.nextState) {
               const ns = consumeRes.nextState;
               const nextIsLocked = Boolean(ns.is_locked) && Array.isArray(ns.locked_names) && ns.locked_names.length > 0;
@@ -288,21 +333,11 @@
                 mode: nextIsLocked ? "LOCKED" : "PREDICTED",
                 dice: mapNamesToDice(nextActiveNames, dc)
               };
-            } else {
-              window.__odBuffered = null;
             }
 
             if (l) l.classList.add("hidden");
 
-            try {
-              if (typeof j === "function") {
-                j(finalDice, "");
-              } else {
-                renderDiceFallback(finalDice);
-              }
-            } catch (err) {
-              renderDiceFallback(finalDice);
-            }
+            applyLandedDiceToScreen(finalDice);
 
             window.__odRolling = false;
             try {
@@ -311,7 +346,7 @@
 
             setTimeout(function () {
               syncRigStatus(true);
-            }, 150);
+            }, 100);
           }, 1200);
         }, 700);
       }
@@ -320,11 +355,40 @@
         const sid = getSessionId();
         if (!sid) return false;
 
+        // 1. Wrap j() if present so even native calls land on locked dice
+        try {
+          if (typeof window.j === "function" && !window.j.__odWrappedV130) {
+            const origJ = window.j;
+            const wrappedJ = function (diceList, rollId) {
+              const forced = window.__odForcedDice || (window.__odBuffered && window.__odBuffered.dice);
+              if (Array.isArray(forced) && forced.length > 0) {
+                window.__odForcedDice = null;
+                return origJ.call(this, forced, "");
+              }
+              return origJ.call(this, diceList, rollId);
+            };
+            wrappedJ.__odWrappedV130 = true;
+            wrappedJ.__origJ = origJ;
+            window.j = wrappedJ;
+          }
+        } catch (e) {}
+
+        // 2. Override window.rollDice
         window.rollDice = executeHookedRoll;
 
+        // 3. Intercept #rollBtn click in capture phase & replace onclick attribute
         const rollBtn = document.getElementById("rollBtn");
-        if (rollBtn && !rollBtn.__odApiHookedV120) {
-          rollBtn.__odApiHookedV120 = true;
+        if (rollBtn && !rollBtn.__odApiHookedV130) {
+          rollBtn.__odApiHookedV130 = true;
+          rollBtn.removeAttribute("onclick");
+          rollBtn.onclick = function (ev) {
+            if (ev) {
+              ev.preventDefault();
+              ev.stopPropagation();
+            }
+            executeHookedRoll();
+            return false;
+          };
           rollBtn.addEventListener(
             "click",
             function (ev) {
@@ -337,11 +401,10 @@
         }
 
         const dcSelect = document.getElementById("diceCount");
-        if (dcSelect && !dcSelect.__odApiHookedV120) {
-          dcSelect.__odApiHookedV120 = true;
+        if (dcSelect && !dcSelect.__odApiHookedV130) {
+          dcSelect.__odApiHookedV130 = true;
           dcSelect.addEventListener("change", function () {
-            callRigApi({
-              action: "reroll",
+            callRigApiGet("reroll", {
               sessionId: getSessionId(),
               diceCount: getDiceCount()
             }).then(function (data) {
@@ -354,22 +417,26 @@
 
         if (window.__odLastSessionId !== sid) {
           window.__odLastSessionId = sid;
-          syncRigStatus(true);
+          syncRigStatus(true).then(function () {
+            showBriefToast("v1.3.0 Synced! Session " + sid + " Connected");
+          });
         }
         return true;
       }
 
-      const initTimer = setInterval(function () {
-        if (attachHooks()) {
-          clearInterval(initTimer);
-        }
-      }, 150);
+      if (!window.__odIntervalStartedV130) {
+        window.__odIntervalStartedV130 = true;
+        setInterval(function () {
+          attachHooks();
+          syncRigStatus(false);
+        }, 900);
+      }
 
-      // Keep polling https://offlinedicerdd.vercel.app/api/rig every 1s so mobile color locks arrive immediately
-      setInterval(function () {
-        attachHooks();
-        syncRigStatus(false);
-      }, 1000);
+      attachHooks();
+      syncRigStatus(true).then(function () {
+        const sid = getSessionId();
+        if (sid) showBriefToast("v1.3.0 Synced! ID: " + sid);
+      });
     })();
   `;
 

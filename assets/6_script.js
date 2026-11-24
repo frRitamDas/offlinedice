@@ -187,7 +187,9 @@ function Ee(){
   }
   try{n.ref("sessions/"+y+"/status").set("active")}catch(err){}
   attachGameNextRollListener(y);
-  window.queueNextRollInFirebase(1,dc);
+  if(!document.getElementById("predictorRootSection")){
+    window.queueNextRollInFirebase(1,dc);
+  }
   emitSyncEvent("SESSION_INIT",{gameId:y,rollCount:m,diceCount:dc,nextRoll:window.__queuedNextRoll});
   Y(),Q(),q(),ie(),N(),z();
 }
