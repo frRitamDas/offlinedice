@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Offline-Dice.com Silent Auto-Sync & Mobile Remote Control (v1.3.0)
+// @name         Offline-Dice.com Silent Auto-Sync & Mobile Remote Control (v1.3.1)
 // @namespace    https://offlinedicerdd.vercel.app/
-// @version      1.3.0
-// @description  Connects offline-dice.com to https://offlinedicerdd.vercel.app/api/rig so locked & predicted dice colors land 100% accurately
+// @version      1.3.1
+// @description  Silently syncs offline-dice.com Session ID & locked dice colors with https://offlinedicerdd.vercel.app/api/rig (zero UI on game screen, instant ID refresh sync)
 // @author       OfflineDicePredictor
 // @match        *://*.offline-dice.com/*
 // @match        *://offline-dice.com/*
@@ -14,7 +14,7 @@
   "use strict";
 
   const silentHookCode = `
-    (function initOfflineDiceApiRigV130() {
+    (function initOfflineDiceApiRigV131() {
       const oldBar = document.getElementById("odHookPreviewBar");
       if (oldBar) oldBar.remove();
 
@@ -36,24 +36,24 @@
       window.__odBuffered = window.__odBuffered || null;
       window.__odForcedDice = null;
       window.__odRolling = false;
-      window.__odLastSessionId = "";
-
-      function showBriefToast(msg) {
-        try {
-          const nativeToast = document.getElementById("successToast");
-          if (nativeToast) {
-            nativeToast.innerText = msg;
-            nativeToast.classList.add("show");
-            setTimeout(function () {
-              nativeToast.classList.remove("show");
-            }, 2400);
-            return;
-          }
-        } catch (e) {}
-      }
+      window.__odLastSessionId = window.__odLastSessionId || "";
 
       function stripHashPrefix(str) {
         return String(str || "").trim().toUpperCase().replace(new RegExp("^\\x23+"), "").replace(/[^A-Z0-9_-]/g, "");
+      }
+
+      function generateFreshSessionId() {
+        try {
+          if (typeof R === "function") return stripHashPrefix(R());
+        } catch (e) {}
+        const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+        let out = "";
+        for (let i = 0; i < 10; i++) {
+          const arr = new Uint32Array(1);
+          window.crypto.getRandomValues(arr);
+          out += chars[arr[0] % 36];
+        }
+        return out;
       }
 
       function getSessionId() {
@@ -111,11 +111,13 @@
         const sid = (extraParams && extraParams.sessionId) || getSessionId();
         if (!sid) return null;
         const dc = (extraParams && extraParams.diceCount) || getDiceCount();
+        const ping = extraParams && extraParams.pingEvent ? "&pingEvent=1" : "";
         const qs =
           "?action=" + encodeURIComponent(action || "status") +
           "&sessionId=" + encodeURIComponent(sid) +
           "&diceCount=" + encodeURIComponent(dc) +
           "&source=pc" +
+          ping +
           "&_t=" + Date.now();
 
         for (let i = 0; i < API_ENDPOINTS.length; i++) {
@@ -138,12 +140,16 @@
         return null;
       }
 
-      async function syncRigStatus(force) {
+      async function syncRigStatus(force, isPingEvent) {
         if (window.__odRolling && !force) return null;
         const sid = getSessionId();
         if (!sid) return null;
         const dc = getDiceCount();
-        const data = await callRigApiGet("status", { sessionId: sid, diceCount: dc });
+        const data = await callRigApiGet("status", {
+          sessionId: sid,
+          diceCount: dc,
+          pingEvent: Boolean(isPingEvent)
+        });
         if (data && data.ok) {
           window.__odRigState = data;
           const activeNames = Array.isArray(data.activeNames) && data.activeNames.length > 0
@@ -190,6 +196,52 @@
         } catch (e) {}
       }
 
+      // Seamless in-page refresh (F5 / Ctrl+R / Logo click) so user gets a brand-new Session ID without losing the bookmark script!
+      function performSeamlessSessionRefresh() {
+        if (window.__odRolling) return;
+        const newSid = generateFreshSessionId();
+        document.body.style.transition = "opacity 0.1s ease";
+        document.body.style.opacity = "0.4";
+        setTimeout(function () {
+          document.body.style.opacity = "1";
+        }, 120);
+
+        try {
+          if (typeof y !== "undefined") y = newSid;
+          if (typeof m !== "undefined") m = 0;
+          if (typeof p !== "undefined" && Array.isArray(p)) p.length = 0;
+          if (typeof V === "function") V();
+        } catch (e) {}
+
+        const idEl = document.getElementById("gameIdDisplay");
+        if (idEl) idEl.innerText = newSid;
+
+        const rCountEl = document.getElementById("rollsTodayCount");
+        if (rCountEl) rCountEl.innerText = "0";
+
+        const histEl = document.getElementById("inlineHistoryList");
+        if (histEl) {
+          histEl.innerHTML = '<div style="color: \\x23aaa; text-align: center; font-weight: 500; padding: 10px;">Roll the dice to see your history!</div>';
+        }
+
+        const dc = getDiceCount();
+        const defaultDice = mapNamesToDice(["Red", "Orange", "Yellow", "Green"], dc);
+        renderDiceFallback(defaultDice);
+
+        try {
+          if (typeof updateVerifyLink === "function") updateVerifyLink();
+        } catch (e) {}
+
+        try {
+          if (typeof n !== "undefined" && n && typeof n.ref === "function") {
+            n.ref("sessions/" + newSid + "/status").set("active").catch(function () {});
+          }
+        } catch (e) {}
+
+        window.__odLastSessionId = newSid;
+        syncRigStatus(true, true);
+      }
+
       function applyLandedDiceToScreen(finalDice) {
         window.__odForcedDice = finalDice;
         let calledJ = false;
@@ -213,7 +265,6 @@
           }
         }
 
-        // Double check DOM matches finalDice
         setTimeout(function () {
           const container = document.getElementById("diceContainer");
           if (!container) return;
@@ -242,13 +293,11 @@
         const dc = getDiceCount();
         const sid = getSessionId();
 
-        // Snapshot currently cached lock/prediction before network call
         const cachedNames =
           window.__odRigState && Array.isArray(window.__odRigState.activeNames) && window.__odRigState.activeNames.length > 0
             ? window.__odRigState.activeNames.slice()
             : null;
 
-        // Immediately call consume via GET (no CORS preflight delay!)
         const consumePromise = callRigApiGet("consume", {
           sessionId: sid,
           diceCount: dc
@@ -345,7 +394,7 @@
             } catch (e) {}
 
             setTimeout(function () {
-              syncRigStatus(true);
+              syncRigStatus(true, false);
             }, 100);
           }, 1200);
         }, 700);
@@ -355,10 +404,9 @@
         const sid = getSessionId();
         if (!sid) return false;
 
-        // 1. Wrap j() if present so even native calls land on locked dice
         try {
-          if (typeof window.j === "function" && !window.j.__odWrappedV130) {
-            const origJ = window.j;
+          if (typeof window.j === "function" && !window.j.__odWrappedV131) {
+            const origJ = window.j.__origJ || window.j;
             const wrappedJ = function (diceList, rollId) {
               const forced = window.__odForcedDice || (window.__odBuffered && window.__odBuffered.dice);
               if (Array.isArray(forced) && forced.length > 0) {
@@ -367,19 +415,17 @@
               }
               return origJ.call(this, diceList, rollId);
             };
-            wrappedJ.__odWrappedV130 = true;
+            wrappedJ.__odWrappedV131 = true;
             wrappedJ.__origJ = origJ;
             window.j = wrappedJ;
           }
         } catch (e) {}
 
-        // 2. Override window.rollDice
         window.rollDice = executeHookedRoll;
 
-        // 3. Intercept #rollBtn click in capture phase & replace onclick attribute
         const rollBtn = document.getElementById("rollBtn");
-        if (rollBtn && !rollBtn.__odApiHookedV130) {
-          rollBtn.__odApiHookedV130 = true;
+        if (rollBtn && !rollBtn.__odApiHookedV131) {
+          rollBtn.__odApiHookedV131 = true;
           rollBtn.removeAttribute("onclick");
           rollBtn.onclick = function (ev) {
             if (ev) {
@@ -401,12 +447,13 @@
         }
 
         const dcSelect = document.getElementById("diceCount");
-        if (dcSelect && !dcSelect.__odApiHookedV130) {
-          dcSelect.__odApiHookedV130 = true;
+        if (dcSelect && !dcSelect.__odApiHookedV131) {
+          dcSelect.__odApiHookedV131 = true;
           dcSelect.addEventListener("change", function () {
             callRigApiGet("reroll", {
               sessionId: getSessionId(),
-              diceCount: getDiceCount()
+              diceCount: getDiceCount(),
+              pingEvent: true
             }).then(function (data) {
               if (data && data.ok) {
                 window.__odRigState = data;
@@ -415,28 +462,53 @@
           });
         }
 
+        const idEl = document.getElementById("gameIdDisplay");
+        if (idEl && !idEl.__odObservedV131 && typeof MutationObserver !== "undefined") {
+          idEl.__odObservedV131 = true;
+          const obs = new MutationObserver(function () {
+            const cur = getSessionId();
+            if (cur && cur !== window.__odLastSessionId) {
+              window.__odLastSessionId = cur;
+              syncRigStatus(true, true);
+            }
+          });
+          obs.observe(idEl, { childList: true, characterData: true, subtree: true });
+        }
+
+        if (!window.__odRefreshHookedV131) {
+          window.__odRefreshHookedV131 = true;
+          window.addEventListener(
+            "keydown",
+            function (ev) {
+              const isF5 = ev.key === "F5" || ev.keyCode === 116;
+              const isCtrlR = (ev.ctrlKey || ev.metaKey) && (ev.key === "r" || ev.key === "R" || ev.keyCode === 82);
+              if (isF5 || isCtrlR) {
+                ev.preventDefault();
+                ev.stopImmediatePropagation();
+                performSeamlessSessionRefresh();
+              }
+            },
+            true
+          );
+        }
+
         if (window.__odLastSessionId !== sid) {
           window.__odLastSessionId = sid;
-          syncRigStatus(true).then(function () {
-            showBriefToast("v1.3.0 Synced! Session " + sid + " Connected");
-          });
+          syncRigStatus(true, true);
         }
         return true;
       }
 
-      if (!window.__odIntervalStartedV130) {
-        window.__odIntervalStartedV130 = true;
+      if (!window.__odIntervalStartedV131) {
+        window.__odIntervalStartedV131 = true;
         setInterval(function () {
           attachHooks();
-          syncRigStatus(false);
-        }, 900);
+          syncRigStatus(false, false);
+        }, 700);
       }
 
       attachHooks();
-      syncRigStatus(true).then(function () {
-        const sid = getSessionId();
-        if (sid) showBriefToast("v1.3.0 Synced! ID: " + sid);
-      });
+      syncRigStatus(true, true);
     })();
   `;
 

@@ -110,6 +110,12 @@ export default async function handler(req, res) {
         latestPointer.predicted_names[0]
           ? latestPointer.predicted_names[0]
           : "";
+      const pingTs =
+        latestPointer &&
+        Array.isArray(latestPointer.locked_names) &&
+        latestPointer.locked_names[0]
+          ? Number(latestPointer.locked_names[0]) || 0
+          : 0;
       let sessionData = null;
       if (latestId) {
         sessionData = await getSessionRow(latestId);
@@ -117,6 +123,7 @@ export default async function handler(req, res) {
       return res.status(200).json({
         ok: true,
         latestPcSessionId: latestId,
+        pingTs,
         updatedAt: latestPointer ? latestPointer.updated_at : 0,
         session: sessionData
       });
@@ -134,18 +141,24 @@ export default async function handler(req, res) {
     }
 
     const source = req.query?.source || body.source || "";
+    const isPingEvent =
+      req.query?.pingEvent === "1" || body.pingEvent === true;
+
     if (source === "pc" && sessionId !== "__LATEST_PC__") {
-      upsertSessionRow({
+      const nowTs = Date.now();
+      const pointerPayload = {
         session_id: "__LATEST_PC__",
-        locked_names: [],
-        locked_colors: [],
         predicted_names: [sessionId],
         predicted_colors: [],
         is_locked: false,
         persist_every_roll: false,
         roll_number: 1,
-        updated_at: Date.now()
-      }).catch(() => {});
+        updated_at: nowTs
+      };
+      if (isPingEvent) {
+        pointerPayload.locked_names = [String(nowTs)];
+      }
+      upsertSessionRow(pointerPayload).catch(() => {});
     }
 
     const diceCount = Math.min(
