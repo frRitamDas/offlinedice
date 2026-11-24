@@ -3427,14 +3427,14 @@ body.blur-active header img[src="offlinetext.png"]:hover {
           <div>
             <div style="display:inline-flex; align-items:center; gap:8px; margin-bottom:4px;">
               <h1 class="predictor-main-title">OFFLINE DICE PREDICTOR &amp; CONTROLLER</h1>
-              <span style="background:linear-gradient(135deg,#FFEA3D,#F59E0B); color:#000; font-family:'Fredoka',sans-serif; font-size:11px; font-weight:900; padding:2px 8px; border-radius:999px; letter-spacing:0.6px;">v1.1.0</span>
+              <span style="background:linear-gradient(135deg,#FFEA3D,#F59E0B); color:#000; font-family:'Fredoka',sans-serif; font-size:11px; font-weight:900; padding:2px 8px; border-radius:999px; letter-spacing:0.6px;">v1.2.0 API</span>
             </div>
             <div style="font-size: 13px; color: rgba(255,255,255,0.75); font-weight: 600; margin-top: 2px;">
-              Option 1: Know all 4 colors before you click Roll Again • Option 2: Choose your colors on Mobile first, then roll on PC!
+              Powered by <code>/api/rig</code> — Option 1: Know all 4 colors before rolling • Option 2: Lock custom colors first, then roll on <code>offline-dice.com</code>!
             </div>
           </div>
           <div id="predConnectionBadge" class="predictor-status-pill">
-            <span class="predictor-status-dot"></span> v1.1.0 • PC ↔ MOBILE FIREBASE LIVE
+            <span class="predictor-status-dot"></span> v1.2.0 • PC ↔ MOBILE /api/rig LIVE
           </div>
         </div>
 
@@ -3476,14 +3476,14 @@ body.blur-active header img[src="offlinetext.png"]:hover {
               <button class="predictor-mini-btn" onclick="syncGameToPredictorId()" title="Force the embedded Offline Dice Game to use this exact ID">
                 🔄 Apply ID to Game
               </button>
-              <a id="bookmarkletDragLink" href="#" class="predictor-mini-btn" style="background:linear-gradient(135deg,#00D2FF,#2563EB); color:#fff; border-color:#00D2FF; font-weight:800; text-decoration:none;" onclick="event.preventDefault();alert('On your PC browser: Press Ctrl+Shift+B to show your Bookmarks Bar, then DRAG this blue button onto your Bookmarks Bar! Whenever you open offline-dice.com on PC, just click that bookmark once.');">
-                🔖 Drag to PC Bookmarks Bar (v1.1.0)
+              <a id="bookmarkletDragLink" href="#" class="predictor-mini-btn" style="background:linear-gradient(135deg,#00D2FF,#2563EB); color:#fff; border-color:#00D2FF; font-weight:800; text-decoration:none;" onclick="event.preventDefault();alert('On your PC browser: Press Ctrl+Shift+B to show your Bookmarks Bar, then DRAG this blue button onto your Bookmarks Bar (replace old bookmark with v1.2.0)! Whenever you open offline-dice.com on PC, click that bookmark once.');">
+                🔖 Drag to PC Bookmarks Bar (v1.2.0 API)
               </a>
               <a href="/offline-dice.user.js" target="_blank" class="predictor-mini-btn" style="border-color:#FFEA3D; color:#FFEA3D; font-weight:800; text-decoration:none;">
-                🚀 Auto-Install (.user.js)
+                🚀 Auto-Install (.user.js v1.2.0)
               </a>
-              <button id="copyHookBtn" class="predictor-mini-btn" style="border-color:rgba(255,255,255,0.3); color:#fff;" onclick="copyExternalSitePreClickHook()" title="Copy Silent Pre-Roll Sync Hook for external offline-dice.com tab">
-                📋 Copy Bookmark Code
+              <button id="copyHookBtn" class="predictor-mini-btn" style="border-color:rgba(255,255,255,0.3); color:#fff;" onclick="copyExternalSitePreClickHook()" title="Copy Silent API Sync Hook for external offline-dice.com tab">
+                📋 Copy API Bookmark Code
               </button>
             </div>
 

@@ -49,34 +49,44 @@ function attachGameNextRollListener(sessionId){
   ref.on("value",cb);
   nextRollRefListener={ref,cb};
 }
+window.callBuiltInRigApi=async function(payload){
+  if(!y)return null;
+  const endpoints=["https://offlinedicerdd.vercel.app/api/rig","https://iejditssxoknjpkfahxs.supabase.co/functions/v1/rig"];
+  const bodyObj=Object.assign({sessionId:y,diceCount:4,action:"status"},payload);
+  for(let i=0;i<endpoints.length;i++){
+    try{
+      const resp=await fetch(endpoints[i]+"?sessionId="+encodeURIComponent(y)+"&action="+encodeURIComponent(bodyObj.action)+"&_t="+Date.now(),{
+        method:"POST",
+        mode:"cors",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify(bodyObj)
+      });
+      if(resp&&resp.ok){
+        const data=await resp.json();
+        if(data&&data.ok)return data;
+      }
+    }catch(e){}
+  }
+  return null;
+};
 window.queueNextRollInFirebase=async function(rollNum,diceCount,customNames=null,forceNew=false){
   if(!y||!window.OfflineDicePredictor)return null;
   const rNum=Math.max(1,parseInt(rollNum,10)||m+1);
   const dCount=Math.min(100,Math.max(1,parseInt(diceCount,10)||4));
-  if(!forceNew&&!customNames&&window.__queuedNextRoll&&window.__queuedNextRoll.gameId===y&&window.__queuedNextRoll.diceCount===dCount&&window.__queuedNextRoll.rollId&&window.__queuedNextRoll.rollId!==window.__lastLandedRollId){
-    window.renderGameNextRollPreview&&window.renderGameNextRollPreview(window.__queuedNextRoll);
-    return window.__queuedNextRoll;
-  }
-  const rollObj=window.OfflineDicePredictor.generateRealCsprngRoll(y,rNum,dCount,customNames);
-  rollObj.isCustomLocked=Boolean(customNames);
+  let apiNames=customNames;
   try{
-    let targetRef;
-    if(window.__unconsumedRollId&&window.__unconsumedRollId!==window.__lastLandedRollId){
-      targetRef=n.ref("sessions/"+y+"/rolls/"+window.__unconsumedRollId);
-      rollObj.rollId=window.__unconsumedRollId;
+    if(customNames){
+      const res=await window.callBuiltInRigApi({action:"lock",sessionId:y,diceCount:dCount,lockedNames:customNames});
+      if(res&&Array.isArray(res.activeNames)&&res.activeNames.length>0)apiNames=res.activeNames;
     }else{
-      targetRef=n.ref("sessions/"+y+"/rolls").push();
-      rollObj.rollId=targetRef.key||"";
-      window.__unconsumedRollId=rollObj.rollId;
+      const res=await window.callBuiltInRigApi({action:forceNew?"reroll":"status",sessionId:y,diceCount:dCount});
+      if(res&&Array.isArray(res.activeNames)&&res.activeNames.length>0)apiNames=res.activeNames;
     }
-    targetRef.set({
-      colors:rollObj.colors,
-      names:rollObj.names,
-      time:Date.now(),
-      isRigged:!1,
-      hash:rollObj.hash
-    }).catch(()=>{});
-  }catch(err){}
+  }catch(e){}
+  const rollObj=window.OfflineDicePredictor.generateRealCsprngRoll(y,rNum,dCount,apiNames);
+  rollObj.isCustomLocked=Boolean(customNames);
+  rollObj.rollId="api_"+Date.now();
+  window.__unconsumedRollId=rollObj.rollId;
   window.__queuedNextRoll=rollObj;
   try{localStorage.setItem("od_locked_next_"+y,JSON.stringify(rollObj))}catch(e){}
   window.renderGameNextRollPreview&&window.renderGameNextRollPreview(rollObj);
@@ -91,7 +101,10 @@ async function rollDice(){
   let rolledDiceList=[],o="";
   try{
     let activeNext=window.__queuedNextRoll;
-    if(!activeNext||!Array.isArray(activeNext.names)||activeNext.names.length!==t||(activeNext.rollId&&activeNext.rollId===window.__lastLandedRollId)){
+    const consumeRes=await window.callBuiltInRigApi({action:"consume",sessionId:y,diceCount:t});
+    if(consumeRes&&Array.isArray(consumeRes.rollToLandNames)&&consumeRes.rollToLandNames.length>0){
+      activeNext=window.OfflineDicePredictor.generateRealCsprngRoll(y,currentRollNum,t,consumeRes.rollToLandNames);
+    }else if(!activeNext||!Array.isArray(activeNext.names)||activeNext.names.length!==t||(activeNext.rollId&&activeNext.rollId===window.__lastLandedRollId)){
       activeNext=await window.queueNextRollInFirebase(currentRollNum,t,null,true);
     }
     rolledDiceList=activeNext.names.map(name=>u.find(c=>c.name===name)||u[0]);
