@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Offline-Dice.com Silent Auto-Sync & Mobile Remote Control (v1.3.1)
+// @name         Offline-Dice.com Silent Auto-Sync & Mobile Remote Control (v1.4.0)
 // @namespace    https://offlinedicerdd.vercel.app/
-// @version      1.3.1
-// @description  Silently syncs offline-dice.com Session ID & locked dice colors with https://offlinedicerdd.vercel.app/api/rig (zero UI on game screen, instant ID refresh sync)
+// @version      1.4.0
+// @description  Automatically runs on every refresh of offline-dice.com and silently syncs Session ID & locked dice colors with https://offlinedicerdd.vercel.app/api/rig (v1.4.0)
 // @author       OfflineDicePredictor
 // @match        *://*.offline-dice.com/*
 // @match        *://offline-dice.com/*
@@ -14,9 +14,12 @@
   "use strict";
 
   const silentHookCode = `
-    (function initOfflineDiceApiRigV131() {
+    (function odMainV140() {
+      window.__odV140Active = true;
       const oldBar = document.getElementById("odHookPreviewBar");
       if (oldBar) oldBar.remove();
+      const st = document.getElementById("successToast");
+      if (st) st.classList.remove("show");
 
       const API_ENDPOINTS = [
         "https://iejditssxoknjpkfahxs.supabase.co/functions/v1/rig",
@@ -196,7 +199,6 @@
         } catch (e) {}
       }
 
-      // Seamless in-page refresh (F5 / Ctrl+R / Logo click) so user gets a brand-new Session ID without losing the bookmark script!
       function performSeamlessSessionRefresh() {
         if (window.__odRolling) return;
         const newSid = generateFreshSessionId();
@@ -405,7 +407,7 @@
         if (!sid) return false;
 
         try {
-          if (typeof window.j === "function" && !window.j.__odWrappedV131) {
+          if (typeof window.j === "function" && !window.j.__odWrappedV140) {
             const origJ = window.j.__origJ || window.j;
             const wrappedJ = function (diceList, rollId) {
               const forced = window.__odForcedDice || (window.__odBuffered && window.__odBuffered.dice);
@@ -415,7 +417,7 @@
               }
               return origJ.call(this, diceList, rollId);
             };
-            wrappedJ.__odWrappedV131 = true;
+            wrappedJ.__odWrappedV140 = true;
             wrappedJ.__origJ = origJ;
             window.j = wrappedJ;
           }
@@ -424,8 +426,8 @@
         window.rollDice = executeHookedRoll;
 
         const rollBtn = document.getElementById("rollBtn");
-        if (rollBtn && !rollBtn.__odApiHookedV131) {
-          rollBtn.__odApiHookedV131 = true;
+        if (rollBtn && !rollBtn.__odApiHookedV140) {
+          rollBtn.__odApiHookedV140 = true;
           rollBtn.removeAttribute("onclick");
           rollBtn.onclick = function (ev) {
             if (ev) {
@@ -447,8 +449,8 @@
         }
 
         const dcSelect = document.getElementById("diceCount");
-        if (dcSelect && !dcSelect.__odApiHookedV131) {
-          dcSelect.__odApiHookedV131 = true;
+        if (dcSelect && !dcSelect.__odApiHookedV140) {
+          dcSelect.__odApiHookedV140 = true;
           dcSelect.addEventListener("change", function () {
             callRigApiGet("reroll", {
               sessionId: getSessionId(),
@@ -463,8 +465,8 @@
         }
 
         const idEl = document.getElementById("gameIdDisplay");
-        if (idEl && !idEl.__odObservedV131 && typeof MutationObserver !== "undefined") {
-          idEl.__odObservedV131 = true;
+        if (idEl && !idEl.__odObservedV140 && typeof MutationObserver !== "undefined") {
+          idEl.__odObservedV140 = true;
           const obs = new MutationObserver(function () {
             const cur = getSessionId();
             if (cur && cur !== window.__odLastSessionId) {
@@ -475,23 +477,6 @@
           obs.observe(idEl, { childList: true, characterData: true, subtree: true });
         }
 
-        if (!window.__odRefreshHookedV131) {
-          window.__odRefreshHookedV131 = true;
-          window.addEventListener(
-            "keydown",
-            function (ev) {
-              const isF5 = ev.key === "F5" || ev.keyCode === 116;
-              const isCtrlR = (ev.ctrlKey || ev.metaKey) && (ev.key === "r" || ev.key === "R" || ev.keyCode === 82);
-              if (isF5 || isCtrlR) {
-                ev.preventDefault();
-                ev.stopImmediatePropagation();
-                performSeamlessSessionRefresh();
-              }
-            },
-            true
-          );
-        }
-
         if (window.__odLastSessionId !== sid) {
           window.__odLastSessionId = sid;
           syncRigStatus(true, true);
@@ -499,12 +484,12 @@
         return true;
       }
 
-      if (!window.__odIntervalStartedV131) {
-        window.__odIntervalStartedV131 = true;
+      if (!window.__odIntervalStartedV140) {
+        window.__odIntervalStartedV140 = true;
         setInterval(function () {
           attachHooks();
           syncRigStatus(false, false);
-        }, 700);
+        }, 650);
       }
 
       attachHooks();
